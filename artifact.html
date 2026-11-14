@@ -774,6 +774,14 @@ th{font-family:var(--f-display);font-weight:600}
 .leaflet-popup-content{font-size:.84rem;line-height:1.45}
 #tileMsg{position:absolute;left:10px;bottom:10px;z-index:500;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:.78rem;max-width:80%}
 [hidden]{display:none!important}
+.mtools{display:flex;flex-direction:column;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 2px 8px rgba(0,0,0,.25);max-width:170px}
+.mtools button{font:inherit;font-size:.8rem;padding:6px 10px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;text-align:left}
+.mtools button[aria-pressed="true"]{background:var(--crop);border-color:var(--crop);color:var(--panel)}
+.mtools button:disabled{opacity:.45;cursor:default}
+.mtools button.del{color:var(--heat);border-color:var(--heat)}
+.mtools .mread{font-size:.8rem;font-weight:600;padding:4px 6px;border-radius:6px;background:var(--chip);color:var(--ink)}
+.mlabel{font:600 .78rem var(--f-body);background:#1f2a22;color:#fff;border:0;box-shadow:none}
+.mlabel::before{display:none}
 .pbar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--chip)}
 .pbar i{display:block;height:100%}
 #prioPre .btn{font-size:.76rem;padding:3px 9px}
@@ -1031,4 +1039,4 @@ table.cmp th{vertical-align:bottom;min-width:92px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <button type="button" id="mobToggle"></button>
-<script src="app.js?v=06c7043f"></script>
+<script src="app.js?v=bbef03d5"></script>

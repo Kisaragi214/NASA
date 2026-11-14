@@ -617,6 +617,7 @@ const fmtLon = v => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'E' : 'W'}`;
 const fmtLL = (la, lo) => `${fmtLat(la)} ${fmtLon(lo)}`;
 function onMapClick(e) {
   const lat = e.latlng.lat, lng = ((e.latlng.lng + 540) % 360) - 180;
+  if (Date.now() - toolTs < 120) return;
   if (drawing) { drawPoint(e.latlng); return; }
   const box = document.createElement('div');
   const head = document.createElement('b'); head.textContent = fmtLL(lat, lng);
@@ -1099,23 +1100,59 @@ function polyGeom(pts) {
   return { area: Math.abs(a), lat: pts[0][0] + cy / (6 * a) / ky, lon: pts[0][1] + cx / (6 * a) / kx, kx, ky };
 }
 const inPoly = (la, lo, pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [yi, xi] = pts[i], [yj, xj] = pts[j]; if ((yi > la) !== (yj > la) && lo < (xj - xi) * (la - yi) / (yj - yi) + xi) c = !c; } return c; };
-function drawStart() {
-  if (!map) return; map.closePopup();
-  drawing = { pts: [], line: L.polyline([], { color: '#ffffff', weight: 3, dashArray: '6 5', interactive: false }).addTo(map), dots: L.layerGroup().addTo(map) };
+/* Map toolbar: draw the field, measure a distance, measure an area, delete. One drawing engine, three modes. */
+let measureLayer = null, toolBox = null, toolTs = 0; /* toolTs: a toolbar click re-renders the toolbar, and the same click must not reach the map */
+const hav = (a, b) => { const r = Math.PI / 180, dla = (b[0] - a[0]) * r, dlo = (b[1] - a[1]) * r, q = Math.sin(dla / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dlo / 2) ** 2; return 2 * 6371008.8 * Math.asin(Math.sqrt(q)); };
+const pathLen = (pts, closed) => { let d = 0; for (let i = 1; i < pts.length; i++) d += hav(pts[i - 1], pts[i]); if (closed && pts.length > 2) d += hav(pts.at(-1), pts[0]); return d; };
+const fmtDist = d => d < 1000 ? Math.round(d).toLocaleString() + ' m' : (d / 1000).toFixed(2) + ' km';
+const fmtArea = a => { const rai = a / 1600, r = rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1), ha = (a / 1e4).toFixed(2); return a < 1600 ? `${Math.round(a).toLocaleString()} m²` : t(`${r} ไร่ · ${ha} ha`, `${ha} ha · ${r} rai`); };
+const MODE_COL = { field: '#ffffff', dist: '#ffd23f', area: '#ffd23f' };
+function drawStart(mode = 'field') {
+  if (!map) return; drawStop(); map.closePopup();
+  drawing = { mode, pts: [], line: L.polyline([], { color: MODE_COL[mode], weight: 3, dashArray: '6 5', interactive: false }).addTo(map), dots: L.layerGroup().addTo(map) };
   map.getContainer().style.cursor = 'crosshair'; fieldMsg = null; fieldUI();
 }
 function drawPoint(ll) {
-  const d = drawing;
-  if (d.pts.length >= 3 && map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(d.pts[0])) < 14) { drawFinish(); return; }
+  const d = drawing, near = p => map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(p)) < 14;
+  if (d.mode === 'dist' ? d.pts.length >= 2 && near(d.pts.at(-1)) : d.pts.length >= 3 && near(d.pts[0])) { drawFinish(); return; }
   d.pts.push([ll.lat, ((ll.lng + 540) % 360) - 180]); drawRedraw();
 }
 function drawRedraw() {
-  const d = drawing; d.line.setLatLngs(d.pts.length > 2 ? [...d.pts, d.pts[0]] : d.pts); d.dots.clearLayers();
+  const d = drawing; d.line.setLatLngs(d.mode !== 'dist' && d.pts.length > 2 ? [...d.pts, d.pts[0]] : d.pts); d.dots.clearLayers();
   d.pts.forEach((p, i) => L.circleMarker(p, { radius: i ? 4 : 7, color: '#ffffff', weight: 2, fillColor: i ? '#2f7d4f' : '#c4512b', fillOpacity: 1, interactive: false }).addTo(d.dots));
   fieldUI();
 }
 function drawStop() { if (!drawing) return; map.removeLayer(drawing.line); map.removeLayer(drawing.dots); drawing = null; map.getContainer().style.cursor = ''; }
-function drawFinish() { if (!drawing || drawing.pts.length < 3) return; const pts = drawing.pts; drawStop(); setField(pts, true); }
+const drawMin = () => drawing && drawing.mode === 'dist' ? 2 : 3;
+function drawReadout() {
+  const d = drawing; if (!d || !d.pts.length) return '';
+  if (d.mode === 'dist') return d.pts.length > 1 ? fmtDist(pathLen(d.pts)) : '';
+  return d.pts.length > 2 ? `${fmtArea(polyGeom(d.pts).area)} · ${t('รอบแปลง', 'perimeter')} ${fmtDist(pathLen(d.pts, true))}` : d.pts.length > 1 ? fmtDist(pathLen(d.pts)) : '';
+}
+function drawFinish() {
+  if (!drawing || drawing.pts.length < drawMin()) return; const { pts, mode } = drawing; drawStop();
+  if (mode === 'field') { setField(pts, true); return; }
+  if (!measureLayer) measureLayer = L.layerGroup().addTo(map);
+  const closed = mode === 'area', lab = closed ? `${fmtArea(polyGeom(pts).area)}<br>${t('รอบ', 'perimeter')} ${fmtDist(pathLen(pts, true))}` : fmtDist(pathLen(pts));
+  const shp = closed ? L.polygon(pts, { color: '#ffd23f', weight: 3, fillColor: '#ffd23f', fillOpacity: .12, interactive: false }) : L.polyline(pts, { color: '#ffd23f', weight: 3, interactive: false });
+  shp.addTo(measureLayer);
+  const at = closed ? [polyGeom(pts).lat, polyGeom(pts).lon] : pts.at(-1);
+  L.marker(at, { interactive: false, opacity: 0 }).addTo(measureLayer).bindTooltip(lab, { permanent: true, direction: closed ? 'center' : 'right', className: 'mlabel' }).openTooltip();
+  fieldUI();
+}
+function clearAll() { drawStop(); if (measureLayer) measureLayer.clearLayers(); if (FIELD) fieldClear(); else fieldUI(); }
+function mapTools() {
+  if (!map) return;
+  if (!toolBox) { const C = L.Control.extend({ options: { position: 'topright' }, onAdd() { toolBox = L.DomUtil.create('div', 'mtools'); toolBox.addEventListener('click', () => { toolTs = Date.now(); }, true); L.DomEvent.disableClickPropagation(toolBox); L.DomEvent.disableScrollPropagation(toolBox); return toolBox; } }); new C().addTo(map); }
+  const d = drawing, n = d ? d.pts.length : 0, has = FIELD || (measureLayer && measureLayer.getLayers().length);
+  const tools = [['field', FIELD ? t('วาดแปลงใหม่', 'Redraw field') : t('วาดแปลง', 'Draw field')], ['dist', t('วัดระยะ', 'Measure distance')], ['area', t('วัดพื้นที่', 'Measure area')]];
+  toolBox.innerHTML = tools.map(([k, l]) => `<button type="button" data-tool="${k}" aria-pressed="${!!d && d.mode === k}">${l}</button>`).join('')
+    + (d ? `<div class="mread">${drawReadout() || (d.mode === 'dist' ? t('แตะจุดเริ่มต้น', 'Tap the start point') : t('แตะมุมแรก', 'Tap the first corner'))}</div><button type="button" id="tDone"${n < drawMin() ? ' disabled' : ''}>${t('เสร็จ', 'Finish')}</button><button type="button" id="tUndo"${n ? '' : ' disabled'}>${t('ถอยจุด', 'Undo point')}</button><button type="button" id="tCancel">${t('ยกเลิก', 'Cancel')}</button>` : '')
+    + `<button type="button" id="tDel" class="del"${has || d ? '' : ' disabled'}>${t('ลบทั้งหมด', 'Delete all')}</button>`;
+  toolBox.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { if (drawing && drawing.mode === b.dataset.tool) { drawStop(); fieldUI(); } else drawStart(b.dataset.tool); });
+  const on = (id, f) => { const b = toolBox.querySelector('#' + id); if (b) b.onclick = f; };
+  on('tDone', drawFinish); on('tUndo', () => { drawing.pts.pop(); drawRedraw(); }); on('tCancel', () => { drawStop(); fieldUI(); }); on('tDel', clearAll);
+}
 function setField(pts, analyse) {
   const g = polyGeom(pts);
   if (g.area < 100) { fieldMsg = { th: 'แปลงเล็กเกินไปหรือจุดซ้อนกัน ลองวาดใหม่', en: 'The shape is too small or the points overlap; draw again' }; fieldUI(); return; }
@@ -1127,7 +1164,7 @@ function setField(pts, analyse) {
   const far = !S || Math.hypot((S.lat - g.lat) * 110540, (S.lon - g.lon) * g.kx) > 250;
   if (analyse && far) loadLive(g.lat, g.lon); else update();
 }
-function fieldClear() { drawStop(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; update(); }
+function fieldClear() { drawStop(); if (measureLayer) measureLayer.clearLayers(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; update(); }
 function fieldExport() {
   if (!FIELD) return;
   const gj = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Field Shift Map field', area_m2: Math.round(FIELD.area) }, geometry: { type: 'Polygon', coordinates: [[...FIELD.pts, FIELD.pts[0]].map(p => [+p[1].toFixed(6), +p[0].toFixed(6)])] } }] };
@@ -1146,14 +1183,15 @@ function fieldImport(file) {
   rd.readAsText(file);
 }
 function fieldUI() {
+  mapTools();
   const el = $('fieldCtl'); if (!el) return;
   const n = drawing ? drawing.pts.length : 0;
   el.innerHTML = (drawing
-    ? `<button type="button" class="btn" id="fDone" aria-pressed="true"${n < 3 ? ' disabled' : ''}>${t('เสร็จ', 'Finish')} (${n})</button><button type="button" class="btn" id="fUndo"${n ? '' : ' disabled'}>${t('ถอยจุด', 'Undo')}</button><button type="button" class="btn" id="fCancel">${t('ยกเลิก', 'Cancel')}</button>`
+    ? `<button type="button" class="btn" id="fDone" aria-pressed="true"${n < drawMin() ? ' disabled' : ''}>${t('เสร็จ', 'Finish')} (${n})</button><button type="button" class="btn" id="fUndo"${n ? '' : ' disabled'}>${t('ถอยจุด', 'Undo')}</button><button type="button" class="btn" id="fCancel">${t('ยกเลิก', 'Cancel')}</button>`
     : `<button type="button" class="btn" id="fDraw">${FIELD ? t('วาดใหม่', 'Redraw') : t('วาดแปลงของฉัน', 'Draw my field')}</button>${FIELD ? `<button type="button" class="btn" id="fClear">${t('ลบแปลง', 'Remove')}</button><button type="button" class="btn" id="fExp">${t('บันทึก GeoJSON', 'Save GeoJSON')}</button>` : ''}<button type="button" class="btn" id="fImp">${t('เปิดไฟล์ GeoJSON', 'Open GeoJSON')}</button>`)
-    + `<p class="note" style="margin:6px 0 0;flex-basis:100%">${fieldMsg ? '⚠ ' + L2(fieldMsg) : drawing ? t('แตะบนแผนที่ทีละมุมของแปลง อย่างน้อย 3 จุด แล้วกด "เสร็จ" หรือแตะจุดแรกอีกครั้ง', 'Tap each corner of the field on the map, at least 3 points, then press "Finish" or tap the first point again') : FIELD ? '' : t('วาดขอบแปลงเพื่อดูพื้นที่ ความลาดชัน และปริมาณน้ำเป็นลูกบาศก์เมตร', 'Outline your field to get its area, slope and water volumes in cubic metres')}</p>`;
+    + `<p class="note" style="margin:6px 0 0;flex-basis:100%">${fieldMsg ? '⚠ ' + L2(fieldMsg) : drawing ? (drawing.mode === 'dist' ? t('วัดระยะ: แตะบนแผนที่ทีละจุด แล้วกด "เสร็จ" หรือแตะจุดสุดท้ายซ้ำ', 'Distance: tap points on the map, then press "Finish" or tap the last point again') : t('แตะบนแผนที่ทีละมุม อย่างน้อย 3 จุด แล้วกด "เสร็จ" หรือแตะจุดแรกอีกครั้ง', 'Tap each corner on the map, at least 3 points, then press "Finish" or tap the first point again')) + (drawReadout() ? ' · <b>' + drawReadout() + '</b>' : '') : FIELD ? '' : t('ปุ่มวาดแปลง วัดระยะ วัดพื้นที่ และลบ อยู่ที่มุมขวาบนของแผนที่ด้วย · วาดขอบแปลงเพื่อดูพื้นที่ ความลาดชัน และปริมาณน้ำเป็นลูกบาศก์เมตร', 'Draw, measure distance, measure area and delete are also at the top right of the map · outline your field to get its area, slope and water volumes in cubic metres')}</p>`;
   const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
-  on('fDraw', drawStart); on('fDone', drawFinish); on('fUndo', () => { drawing.pts.pop(); drawRedraw(); }); on('fCancel', () => { drawStop(); fieldUI(); });
+  on('fDraw', () => drawStart('field')); on('fDone', drawFinish); on('fUndo', () => { drawing.pts.pop(); drawRedraw(); }); on('fCancel', () => { drawStop(); fieldUI(); });
   on('fClear', fieldClear); on('fExp', fieldExport); on('fImp', () => $('fieldFile').click());
 }
 function fieldInfo(st, ev, scores) {

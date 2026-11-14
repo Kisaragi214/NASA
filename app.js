@@ -1064,5 +1064,10 @@ $('geoBtn').onclick = () => {
 document.body.dataset.lang = LANG;
 setLang(LANG); initMap();
 $('liveList').innerHTML = liveStatusHTML();
-{ const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', () => S && drawCharts()); }
+{ const mq = matchMedia('(prefers-color-scheme: dark)'), root = document.documentElement, btn = $('themeBtn');
+  const isDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : mq.matches;
+  const label = () => { btn.textContent = isDark() ? '☀ Light' : '☾ Dark'; btn.setAttribute('aria-pressed', isDark()); };
+  btn.onclick = () => { root.dataset.theme = isDark() ? 'light' : 'dark'; try { localStorage.setItem('fs-theme', root.dataset.theme); } catch (e) {} label(); if (S) { drawCharts(); if (typeof loadRecent === 'function' && S.recent) loadRecent(S); } };
+  mq.addEventListener && mq.addEventListener('change', () => { label(); S && drawCharts(); });
+  label(); }
 { const m = location.hash.match(/^#p=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/); if (m) loadLive(+m[1], +m[2]); else loadLive(DEFAULT_POINT[0], DEFAULT_POINT[1]); }

@@ -171,6 +171,11 @@ table.cmp th{vertical-align:bottom;min-width:92px}
       <div class="row"><button type="button" class="btn" id="geoBtn"><span class="th">ใช้ตำแหน่งของฉัน</span><span class="en">Use my location</span></button><button type="button" class="btn" id="retryBtn" hidden><span class="th">ลองใหม่</span><span class="en">Retry</span></button></div>
     </div>
     <div>
+      <div class="lbl"><span class="th">แปลงของฉัน</span><span class="en">My field</span></div>
+      <div class="row" id="fieldCtl"></div>
+      <input type="file" id="fieldFile" accept=".geojson,.json,application/geo+json,application/json" hidden>
+    </div>
+    <div>
       <div class="lbl"><span class="th">ผลวิเคราะห์ (แถบรวม)</span><span class="en">Analysis (combined)</span></div>
       <div class="row" id="layerBtns"></div>
       <div class="ctl" style="margin-top:6px">
@@ -248,6 +253,11 @@ table.cmp th{vertical-align:bottom;min-width:92px}
   <section class="block">
     <h2><span class="th">เทียบแผนหมุนเวียน</span><span class="en">Rotation comparison</span></h2>
     <div class="cards" id="cards"></div>
+  </section>
+
+  <section class="block" id="fieldSec" hidden>
+    <h2><span class="th">แปลงของฉัน</span><span class="en">My field</span></h2>
+    <div id="fieldBody"></div>
   </section>
 
   <section class="block">

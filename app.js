@@ -267,6 +267,7 @@ function update() {
         `Versus the current rotation (${R[b0].id}): dry-year irrigation need ${eb.defP80 - base.defP80 >= 0 ? '+' : ''}${Math.round(eb.defP80 - base.defP80)} mm, rain on bare soil ${Math.round(base.erosion * 100)}% → ${Math.round(eb.erosion * 100)}%`)) +
     `<br><span style="color:var(--muted);font-size:.88rem">${t('ข้อควรตรวจก่อนตัดสินใจ', 'Check before deciding')}: ${L2(bb.risk)}</span>`;
   compareTable(st, ev, soil, scores, scrBy);
+  fieldUI(); fieldInfo(st, ev, scores);
   if (mapMode === 'rec') paintCells();
 }
 
@@ -582,6 +583,7 @@ const fmtLon = v => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'E' : 'W'}`;
 const fmtLL = (la, lo) => `${fmtLat(la)} ${fmtLon(lo)}`;
 function onMapClick(e) {
   const lat = e.latlng.lat, lng = ((e.latlng.lng + 540) % 360) - 180;
+  if (drawing) { drawPoint(e.latlng); return; }
   const box = document.createElement('div');
   const head = document.createElement('b'); head.textContent = fmtLL(lat, lng);
   const p = S ? gridCell(lat, lng) : -1, infoEl = document.createElement('div'); if (p >= 0) infoEl.innerHTML = cellHTML(p);
@@ -1039,6 +1041,109 @@ async function loadRecent(site) {
   }
 }
 
+/* ---------- field polygon: draw your own field (T5) ---------- */
+let FIELD = null, drawing = null, fieldLayer = null, fieldMsg = null;
+const FIELD_MAX = 25e6, MODIS_PX = 62500;
+function polyGeom(pts) {
+  const la0 = pts.reduce((a, p) => a + p[0], 0) / pts.length * Math.PI / 180, kx = 111320 * Math.cos(la0), ky = 110540;
+  const xy = pts.map(p => [(p[1] - pts[0][1]) * kx, (p[0] - pts[0][0]) * ky]); let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < xy.length; i++) { const [x1, y1] = xy[i], [x2, y2] = xy[(i + 1) % xy.length], f = x1 * y2 - x2 * y1; a += f; cx += (x1 + x2) * f; cy += (y1 + y2) * f; }
+  a /= 2; if (Math.abs(a) < 1) return { area: 0, lat: pts[0][0], lon: pts[0][1], kx, ky };
+  return { area: Math.abs(a), lat: pts[0][0] + cy / (6 * a) / ky, lon: pts[0][1] + cx / (6 * a) / kx, kx, ky };
+}
+const inPoly = (la, lo, pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [yi, xi] = pts[i], [yj, xj] = pts[j]; if ((yi > la) !== (yj > la) && lo < (xj - xi) * (la - yi) / (yj - yi) + xi) c = !c; } return c; };
+function drawStart() {
+  if (!map) return; map.closePopup();
+  drawing = { pts: [], line: L.polyline([], { color: '#ffffff', weight: 3, dashArray: '6 5', interactive: false }).addTo(map), dots: L.layerGroup().addTo(map) };
+  map.getContainer().style.cursor = 'crosshair'; fieldMsg = null; fieldUI();
+}
+function drawPoint(ll) {
+  const d = drawing;
+  if (d.pts.length >= 3 && map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(d.pts[0])) < 14) { drawFinish(); return; }
+  d.pts.push([ll.lat, ((ll.lng + 540) % 360) - 180]); drawRedraw();
+}
+function drawRedraw() {
+  const d = drawing; d.line.setLatLngs(d.pts.length > 2 ? [...d.pts, d.pts[0]] : d.pts); d.dots.clearLayers();
+  d.pts.forEach((p, i) => L.circleMarker(p, { radius: i ? 4 : 7, color: '#ffffff', weight: 2, fillColor: i ? '#2f7d4f' : '#c4512b', fillOpacity: 1, interactive: false }).addTo(d.dots));
+  fieldUI();
+}
+function drawStop() { if (!drawing) return; map.removeLayer(drawing.line); map.removeLayer(drawing.dots); drawing = null; map.getContainer().style.cursor = ''; }
+function drawFinish() { if (!drawing || drawing.pts.length < 3) return; const pts = drawing.pts; drawStop(); setField(pts, true); }
+function setField(pts, analyse) {
+  const g = polyGeom(pts);
+  if (g.area < 100) { fieldMsg = { th: 'แปลงเล็กเกินไปหรือจุดซ้อนกัน ลองวาดใหม่', en: 'The shape is too small or the points overlap; draw again' }; fieldUI(); return; }
+  if (g.area > FIELD_MAX) { fieldMsg = { th: `พื้นที่ ${(g.area / 1e6).toFixed(1)} km² ใหญ่เกิน 25 km² · ข้อมูลอากาศจุดเดียวใช้แทนพื้นที่ขนาดนี้ไม่ได้ วาดให้เล็กลง`, en: `${(g.area / 1e6).toFixed(1)} km² is over the 25 km² limit · one climate point cannot stand for an area this large; draw a smaller field` }; fieldUI(); return; }
+  FIELD = { pts, area: g.area, lat: g.lat, lon: g.lon }; fieldMsg = null;
+  if (fieldLayer) map.removeLayer(fieldLayer);
+  fieldLayer = L.polygon(pts, { color: '#ffffff', weight: 3, fillColor: '#ffffff', fillOpacity: .08, interactive: false }).addTo(map);
+  map.fitBounds(fieldLayer.getBounds(), { padding: [40, 40], maxZoom: 17 });
+  const far = !S || Math.hypot((S.lat - g.lat) * 110540, (S.lon - g.lon) * g.kx) > 250;
+  if (analyse && far) loadLive(g.lat, g.lon); else update();
+}
+function fieldClear() { drawStop(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; update(); }
+function fieldExport() {
+  if (!FIELD) return;
+  const gj = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Field Shift Map field', area_m2: Math.round(FIELD.area) }, geometry: { type: 'Polygon', coordinates: [[...FIELD.pts, FIELD.pts[0]].map(p => [+p[1].toFixed(6), +p[0].toFixed(6)])] } }] };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(gj)], { type: 'application/geo+json' })); a.download = 'field.geojson'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function fieldImport(file) {
+  const rd = new FileReader();
+  rd.onload = () => { try {
+    const j = JSON.parse(rd.result), geoms = j.type === 'FeatureCollection' ? j.features.map(f => f.geometry) : [j.type === 'Feature' ? j.geometry : j];
+    const g = geoms.find(x => x && (x.type === 'Polygon' || x.type === 'MultiPolygon')); if (!g) throw 0;
+    let ring = (g.type === 'Polygon' ? g.coordinates[0] : g.coordinates[0][0]).map(c => [+c[1], +c[0]]);
+    if (ring.length > 3 && ring[0][0] === ring.at(-1)[0] && ring[0][1] === ring.at(-1)[1]) ring = ring.slice(0, -1);
+    if (ring.length < 3 || ring.some(p => !(Math.abs(p[0]) <= 90) || !(Math.abs(p[1]) <= 180))) throw 0;
+    drawStop(); setField(ring, true);
+  } catch (e) { fieldMsg = { th: 'อ่านไฟล์ไม่ได้ ต้องเป็น GeoJSON ที่มี Polygon (พิกัด lon, lat)', en: 'Could not read the file; it must be GeoJSON with a Polygon (lon, lat)' }; fieldUI(); } };
+  rd.readAsText(file);
+}
+function fieldUI() {
+  const el = $('fieldCtl'); if (!el) return;
+  const n = drawing ? drawing.pts.length : 0;
+  el.innerHTML = (drawing
+    ? `<button type="button" class="btn" id="fDone" aria-pressed="true"${n < 3 ? ' disabled' : ''}>${t('เสร็จ', 'Finish')} (${n})</button><button type="button" class="btn" id="fUndo"${n ? '' : ' disabled'}>${t('ถอยจุด', 'Undo')}</button><button type="button" class="btn" id="fCancel">${t('ยกเลิก', 'Cancel')}</button>`
+    : `<button type="button" class="btn" id="fDraw">${FIELD ? t('วาดใหม่', 'Redraw') : t('วาดแปลงของฉัน', 'Draw my field')}</button>${FIELD ? `<button type="button" class="btn" id="fClear">${t('ลบแปลง', 'Remove')}</button><button type="button" class="btn" id="fExp">${t('บันทึก GeoJSON', 'Save GeoJSON')}</button>` : ''}<button type="button" class="btn" id="fImp">${t('เปิดไฟล์ GeoJSON', 'Open GeoJSON')}</button>`)
+    + `<p class="note" style="margin:6px 0 0;flex-basis:100%">${fieldMsg ? '⚠ ' + L2(fieldMsg) : drawing ? t('แตะบนแผนที่ทีละมุมของแปลง อย่างน้อย 3 จุด แล้วกด "เสร็จ" หรือแตะจุดแรกอีกครั้ง', 'Tap each corner of the field on the map, at least 3 points, then press "Finish" or tap the first point again') : FIELD ? '' : t('วาดขอบแปลงเพื่อดูพื้นที่ ความลาดชัน และปริมาณน้ำเป็นลูกบาศก์เมตร', 'Outline your field to get its area, slope and water volumes in cubic metres')}</p>`;
+  const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
+  on('fDraw', drawStart); on('fDone', drawFinish); on('fUndo', () => { drawing.pts.pop(); drawRedraw(); }); on('fCancel', () => { drawStop(); fieldUI(); });
+  on('fClear', fieldClear); on('fExp', fieldExport); on('fImp', () => $('fieldFile').click());
+}
+function fieldInfo(st, ev, scores) {
+  const sec = $('fieldSec'); if (!sec) return; sec.hidden = !FIELD; if (!FIELD || !S) return;
+  const F = FIELD, ha = F.area / 1e4, rai = F.area / 1600, kx = 111320 * Math.cos(F.lat * Math.PI / 180);
+  const distKm = Math.hypot((S.lat - F.lat) * 110540, (S.lon - F.lon) * kx) / 1000;
+  /* slope inside the field, sampled from the DEM */
+  let sl = [];
+  if (S.dem) {
+    const las = F.pts.map(p => p[0]), los = F.pts.map(p => p[1]), step = Math.max(15, Math.sqrt(F.area / 1500)), dLa = step / 110540, dLo = step / kx;
+    for (let la = Math.min(...las) + dLa / 2; la < Math.max(...las); la += dLa) for (let lo = Math.min(...los) + dLo / 2; lo < Math.max(...los); lo += dLo) if (inPoly(la, lo, F.pts)) { const v = S.dem.slope(la, lo); if (!isNaN(v)) sl.push(v); }
+    if (!sl.length) { const v = S.dem.slope(F.lat, F.lon); if (!isNaN(v)) sl.push(v); }
+  }
+  /* grid cells whose centre is inside the field */
+  let cells = [];
+  if (GRID) { GRID.info.forEach((ci, p) => { const r = Math.floor(p / GRID.n), c = p % GRID.n; if (inPoly(GRID.lat0 - (r + .5) * GRID.dLat, GRID.lon0 + (c + .5) * GRID.dLon, F.pts)) cells.push(ci); }); if (!cells.length) { const p = gridCell(F.lat, F.lon); if (p >= 0) cells.push(GRID.info[p]); } }
+  const A = S.ndvi && S.ndvi.area, hiRisk = cells.length && typeof riskBreaks !== 'undefined' ? cells.filter(ci => ci.farm && riskBreaks.filter(b => ci.risk > b).length >= 3).length / cells.length : null;
+  let pat = '—';
+  if (A && cells.length) { const cnt = {}; cells.forEach(ci => { if (ci.px >= 0 && A.rule[ci.px] >= 0) cnt[A.rule[ci.px]] = (cnt[A.rule[ci.px]] || 0) + 1; }); const tot = Object.values(cnt).reduce((a, b) => a + b, 0); if (tot) pat = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${L2(RNAME[k])} ${Math.round(v / tot * 100)}%`).join(' · '); }
+  const best = scores.indexOf(Math.max(...scores)), m3 = mm => Math.round(mm * F.area / 1000).toLocaleString();
+  const warn = [];
+  if (F.area < MODIS_PX) warn.push(t(`แปลงเล็กกว่า pixel ดาวเทียม MODIS 1 ช่อง (6.25 ha ≈ 39 ไร่): NDVI และรูปแบบพืชพรรณที่เห็นรวมแปลงข้างเคียงด้วย ใช้ดูแนวโน้มของละแวกนี้ ไม่ใช่ของแปลงนี้โดยเฉพาะ`, `The field is smaller than one MODIS satellite pixel (6.25 ha): the NDVI and vegetation pattern include neighbouring fields. Read them as the neighbourhood, not this field alone`));
+  if (distKm > 0.5) warn.push(t(`อากาศและดินที่ใช้คำนวณเป็นของจุดที่วิเคราะห์ ซึ่งห่างจากกลางแปลง ${distKm.toFixed(1)} km`, `Climate and soil are for the analysed point, ${distKm.toFixed(1)} km from the field centre`) + ` <button type="button" class="btn" id="fRe">${t('วิเคราะห์ที่กลางแปลง', 'Analyse at the field centre')}</button>`);
+  $('fieldBody').innerHTML = `<div class="tiles">
+      <div>${t('พื้นที่', 'Area')}<b>${rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1)} ${t('ไร่', 'rai')}</b>${ha.toFixed(2)} ha · ${t('กลางแปลง', 'centre')} ${fmtLL(F.lat, F.lon)}</div>
+      <div>${t('ความลาดชันในแปลง', 'Slope inside the field')}<b>${sl.length ? (sl.reduce((a, b) => a + b, 0) / sl.length).toFixed(1) + '%' : '—'}</b>${sl.length ? t('สูงสุด ', 'max ') + Math.max(...sl).toFixed(1) + '% · ' + sl.length + t(' จุด (SRTM 30 m)', ' samples (SRTM 30 m)') : t('ไม่มีข้อมูลความสูง', 'no elevation data')}</div>
+      <div>${t('ช่องที่เสี่ยงดินพังสูง', 'Cells at high erosion risk')}<b>${hiRisk == null ? '—' : Math.round(hiRisk * 100) + '%'}</b>${cells.length} ${t('ช่อง 30 m ในแปลง · เทียบกันในกริดรอบจุด', 'cells of 30 m in the field · relative to the grid around the point')}</div>
+      <div>${t('รูปแบบพืชพรรณ (กฎ)', 'Vegetation pattern (rules)')}<b style="font-size:.9rem">${pat}</b>MODIS 250 m</div>
+    </div>
+    <div class="tbl" style="margin-top:10px"><table class="cmp"><thead><tr><th>${t('น้ำที่ต้องเติมทั้งแปลง (m³ ต่อปี)', 'Irrigation water for the whole field (m³ per year)')}</th><th>${t('ปีปกติ', 'Average year')}</th><th>${t('ปีแล้ง 1 ใน 5', '1-in-5 dry year')}</th></tr></thead><tbody>
+      ${[...new Set([0, best])].map(i => `<tr><td><i class="tdot" style="background:${PLAN_COL[i]}"></i>${R[i].id} · ${R[i].parts.map(pt => L2(pt.c)).join(' + ')}${i === 0 ? t(' (ปัจจุบัน)', ' (current)') : t(' (คะแนนสูงสุด)', ' (top score)')}</td><td class="num">${m3(ev[i].defMean)}</td><td class="num">${m3(ev[i].defP80)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="note" style="margin-top:6px">${t('m³ = mm ที่ขาด × พื้นที่แปลง (1 mm บน 1 ไร่ = 1.6 m³) · เป็นน้ำที่พืชต้องการเพิ่มจากฝน ยังไม่รวมการสูญเสียในระบบส่งน้ำ', 'm³ = mm of deficit × field area (1 mm on 1 ha = 10 m³) · this is crop water beyond rainfall, before losses in the irrigation system')}</p>
+    ${warn.map(w => `<p class="note" style="margin-top:6px;border-left:3px solid var(--warn);padding-left:8px">⚠ ${w}</p>`).join('')}`;
+  const b = $('fRe'); if (b) b.onclick = () => loadLive(F.lat, F.lon);
+}
+{ const f = $('fieldFile'); if (f) f.onchange = () => { if (f.files[0]) fieldImport(f.files[0]); f.value = ''; }; }
 /* ---------- boot ---------- */
 ['sRain', 'sTemp'].forEach(id => $(id).addEventListener('input', update));
 fetch('data/crops.json').then(r => r.ok ? r.json() : Promise.reject()).then(d => { CROPDB = d; if (S) update(); }).catch(() => { const el = $('screenBody'); if (el) el.innerHTML = `<p class="note">${t('โหลดฐานข้อมูลพืชไม่ได้', 'Could not load the crop database')}</p>`; });

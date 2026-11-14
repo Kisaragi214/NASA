@@ -113,6 +113,9 @@ th{font-family:var(--f-display);font-weight:600}
 .leaflet-popup-content{font-size:.84rem;line-height:1.45}
 #tileMsg{position:absolute;left:10px;bottom:10px;z-index:500;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:.78rem;max-width:80%}
 [hidden]{display:none!important}
+.gridimg{image-rendering:pixelated;image-rendering:crisp-edges}
+#mobToggle{display:none;position:fixed;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:900;padding:10px 16px;border-radius:99px;border:0;background:var(--crop);color:var(--panel);font:inherit;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+@media (max-width:860px){#mobToggle{display:block}}
 .live{list-style:none;padding:0;margin:6px 0 8px;display:flex;flex-direction:column;gap:4px;font-size:.8rem}
 .live li{display:flex;gap:8px;align-items:center}
 .live li i{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
@@ -195,8 +198,9 @@ th{font-family:var(--f-display);font-weight:600}
 <div class="grid">
 <aside class="rail" aria-label="Settings">
   <div class="ctl">
-    <h2><span class="th">แผนปัจจุบันของแปลง</span><span class="en">Current rotation</span></h2>
-    <select id="baseSel" aria-label="Current rotation"></select>
+    <h2><span class="th">พืชหลักที่ปลูกอยู่ตอนนี้</span><span class="en">Main crop grown now</span></h2>
+    <select id="baseSel" aria-label="Main crop"></select>
+    <select id="baseMonth" aria-label="Sowing month"></select>
     <p class="note" id="baseNote"></p>
   </div>
   <div>
@@ -237,10 +241,23 @@ th{font-family:var(--f-display);font-weight:600}
   </section>
 
   <section class="block">
+    <h2><span class="th">พืชที่ปลูกได้ที่จุดนี้ (คัดจากภูมิอากาศจริง)</span><span class="en">Crops that fit this point (screened on real climate)</span></h2>
+    <div id="screenBody"></div>
+  </section>
+
+  <section class="block">
     <h2><span class="th">อากาศและพืชพรรณของจุดนี้</span><span class="en">Climate and vegetation at this point</span></h2>
     <div class="charts">
       <div><div class="chartbox"><canvas id="cClim"></canvas></div><p class="src">NASA POWER 2001–2025 · ET₀: Hargreaves</p></div>
       <div><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src" id="ndviNote"></p></div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="th">SI: จำแนกรูปแบบพืชพรรณรอบจุดนี้ด้วย 2 วิธี</span><span class="en">SI: two ways to classify vegetation patterns around this point</span></h2>
+    <div class="charts">
+      <div><div class="chartbox"><canvas id="cProf"></canvas></div></div>
+      <div id="siBody" style="min-width:0"></div>
     </div>
   </section>
 
@@ -271,6 +288,9 @@ th{font-family:var(--f-display);font-weight:600}
         <tr><td><span class="th">รากลึก</span><span class="en">Deep roots</span></td><td><span class="th">ใช้น้ำที่ดินเก็บไว้ชั้นล่างกว่า 45 cm ได้ (คำนวณจากเนื้อดินของจุดนั้น)</span><span class="en">May draw the water stored below 45 cm (computed from that point's soil texture)</span></td><td>SoilGrids + Saxton &amp; Rawls</td></tr>
         <tr><td><span class="th">รูปแบบพืชพรรณของจุดนี้</span><span class="en">Vegetation pattern at the point</span></td><td><span class="th">NDVI 1 ปีล่าสุดของ pixel ที่คลิก ตัดค่าที่มีเมฆออก แล้วจำแนกด้วยกฎ phenology (ค่าต่ำสุด สูงสุด จำนวนพีค ความยาวฤดู)</span><span class="en">Last year of NDVI at the clicked pixel, cloud-masked, classified by phenology rules (min, max, peak count, season length)</span></td><td>MODIS MOD13Q1 (ORNL DAAC)</td></tr>
         <tr><td><span class="th">แผนแนะนำรายช่อง</span><span class="en">Per-cell recommendation</span></td><td><span class="th">MCDA ทั้งหมดข้างบน + น้ำหนักดินเพิ่มตาม slope ของช่อง</span><span class="en">All criteria above + soil weight raised by the cell's slope</span></td><td><span class="th">ทุกชุดข้างบน</span><span class="en">All of the above</span></td></tr>
+        <tr><td><span class="th">คัดพืชที่ปลูกได้</span><span class="en">Crop screening</span></td><td><span class="th">ค่าต่ำสุดของความเหมาะสม 3 ด้าน (อุณหภูมิรายเดือน, ฝนรวมช่วงปลูก, pH) แบบสี่เหลี่ยมคางหมูของ ECOCROP ลองทุกเดือนเริ่มปลูก · ช่วงฝนปรับตามสัดส่วนอายุพืช (สมมติฐาน)</span><span class="en">Minimum of three ECOCROP trapezoid fits (monthly temperature, rain over the cycle, pH), tried for every start month · rain limits scaled by cycle length (assumption)</span></td><td>NASA POWER, SoilGrids, FAO ECOCROP</td></tr>
+        <tr><td><span class="th">k-means เทียบกับกฎ</span><span class="en">k-means vs rules</span></td><td><span class="th">NDVI 1 ปีของ pixel ราว 9×9 รอบจุด · k-means (k ≤ 4, เริ่มแบบ k-means++ ค่าสุ่มคงที่) เทียบกับกฎ phenology แล้วรายงาน % ที่ตรงกัน</span><span class="en">One year of NDVI for about 9×9 pixels around the point · k-means (k ≤ 4, seeded k-means++) against phenology rules, with % agreement</span></td><td>MODIS MOD13Q1</td></tr>
+        <tr><td><span class="th">รวมข้อมูลต่างความละเอียด</span><span class="en">Harmonising resolutions</span></td><td><span class="th">กริดกลาง 60 m: ความลาดชันเฉลี่ยจาก DEM ~30 m ขึ้นมา, พืชคลุมดินจาก pixel MODIS 250 m ที่ช่องนั้นตกอยู่, ดิน 250 m และภูมิอากาศ ~50 km เป็นค่าเดียวทั้งกริด</span><span class="en">Common 60 m grid: slope averaged up from the ~30 m DEM, ground cover taken from the 250 m MODIS pixel each cell falls in, soil (250 m) and climate (~50 km) uniform across the grid</span></td><td>SRTM, MODIS, SoilGrids, POWER</td></tr>
         <tr><td><span class="th">รายได้</span><span class="en">Income</span></td><td><span class="th">ผู้ใช้ตั้งเอง</span><span class="en">User-set</span></td><td><span class="th">ไม่มีใน NASA</span><span class="en">Not in NASA data</span></td></tr>
       </tbody>
     </table></div>
@@ -320,4 +340,5 @@ th{font-family:var(--f-display);font-weight:600}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<button type="button" id="mobToggle"></button>
 <script src="app.js"></script>

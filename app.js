@@ -16,50 +16,16 @@ const MTH = {
 };
 const M1 = { th: ['ม','ก','มี','เม','พ','มิ','ก','ส','ก','ต','พ','ธ'], en: ['J','F','M','A','M','J','J','A','S','O','N','D'] };
 
-/* Crop parameters. Kc shapes follow FAO-56 Table 12 (maize ini 0.3–0.4 / mid 1.20 / end 0.6;
-   mung bean 0.4 / 1.05 / 0.6; cassava 0.3 / 0.8 / 0.3; pigeon pea uses "beans, dry").
-   Sunn hemp is not in FAO-56: generic green-manure legume. Heat sensitivity is relative (0–1). */
-const CROPS = {
-  maize:   { name:{th:'ข้าวโพด',en:'Maize'}, color:'#c49a1c', sens:1.0, fam:'Poaceae', ph:[5.5,7.5] },
-  mung:    { name:{th:'ถั่วเขียว',en:'Mung bean'}, color:'#2f7d4f', sens:0.8, fam:'Fabaceae', ph:[6.2,7.2] },
-  hemp:    { name:{th:'ปอเทือง',en:'Sunn hemp'}, color:'#7a9a2e', sens:0.3, fam:'Fabaceae', ph:[5.0,7.5] },
-  cassava: { name:{th:'มันสำปะหลัง',en:'Cassava'}, color:'#8a5a33', sens:0.2, fam:'Euphorbiaceae', ph:[4.5,7.5] },
-  pp:      { name:{th:'ถั่วมะแฮะ',en:'Pigeon pea'}, color:'#5b6fb0', sens:0.4, fam:'Fabaceae', ph:[5.0,7.0], deep:true }
+/* Crops and rotations are built at run time from data/crops.json (FAO ECOCROP ranges + our role tags).
+   Kc (crop coefficient) and heat sensitivity are typical values by crop group (FAO-56 Table 12); relative, not variety-specific. */
+let CROPS = {}, R = [], planKey = '';
+const TYPE = {
+  cereal: { kc: 1.15, sens: .8, col: '#c49a1c' }, legume: { kc: 1.05, sens: .7, col: '#2f7d4f' }, cover: { kc: .9, sens: .3, col: '#9ab83a' },
+  root: { kc: .95, sens: .4, col: '#8a5a33' }, oilseed: { kc: 1.1, sens: .6, col: '#d98a2b' }, fiber: { kc: 1.15, sens: .5, col: '#7a6fb0' },
+  forage: { kc: .95, sens: .4, col: '#5fa8a0' }, perennial: { kc: 1.25, sens: .4, col: '#4f7f9a' }
 };
-const MAIZE = {6:['maize',.4],7:['maize',.9],8:['maize',1.2],9:['maize',.6]};
-const R = [
-  { id:'A', name:{th:'ข้าวโพดรอบเดียว',en:'Single maize'}, m:{...MAIZE}, om:.2, n:0, deep:0, income:.5, machine:false,
-    why:{th:'แผนที่ปลูกกันทั่วไป ใช้เป็นเส้นฐาน',en:'Common practice; used as a baseline'},
-    benefit:{th:'คุ้นเคย มีตลาดรับซื้อ ลงทุนต่ำ',en:'Familiar, established market, low cost'},
-    gap:{th:'ผลผลิตจริงของแปลง ราคารับซื้อปีนี้',en:'Actual field yield; this year\'s price'},
-    risk:{th:'ดินโล่งช่วง มี.ค.–มิ.ย. ตอนฝนแรกตกหนัก ปลูกซ้ำทำให้ดินเสื่อมและศัตรูพืชสะสม',en:'Soil bare in Mar–Jun when the first heavy rains fall; monocropping degrades soil and builds up pests'},
-    forage:{th:'ต้นข้าวโพดหลังเก็บทำข้าวโพดหมักเลี้ยงสัตว์ได้',en:'Stover can be ensiled for livestock'} },
-  { id:'B', name:{th:'ถั่วเขียวต้นฝน → ข้าวโพด',en:'Early-rain mung bean → maize'}, m:{3:['mung',.4],4:['mung',1.05],5:['mung',.6],...MAIZE}, om:.45, n:.7, deep:0, income:.8, machine:false,
-    why:{th:'ใช้ช่วงต้นฝนที่ปกติว่าง ถั่วตรึง N ให้ข้าวโพดรอบถัดไป',en:'Uses the early-rain window that is usually idle; the legume fixes N for the following maize'},
-    benefit:{th:'รายได้เพิ่มอีกรอบ ลดปุ๋ย N ดินมีพืชคลุมช่วงฝนแรก',en:'Extra harvest, less N fertiliser, cover during the first rains'},
-    gap:{th:'ความชื้นดินตอนปลูกจริง (SMAP) ตลาดถั่วเขียวในพื้นที่',en:'Soil moisture at sowing (SMAP); local mung bean market'},
-    risk:{th:'เม.ย. ร้อนจัดบ่อย ถ้าฝนต้นฤดูมาช้า ถั่วเสียหายช่วงออกดอก pH ดินต่ำกว่าช่วงที่ถั่วเขียวชอบเล็กน้อย',en:'April is often very hot; a late rainy-season start can hurt flowering. Soil pH is slightly below mung bean\'s preferred range'},
-    forage:{th:'ต้นถั่วหลังเก็บฝักใช้เลี้ยงสัตว์หรือไถกลบได้',en:'Haulms after harvest can feed livestock or be incorporated'} },
-  { id:'C', name:{th:'ปอเทือง (ไถกลบ) → ข้าวโพด',en:'Sunn hemp green manure → maize'}, m:{3:['hemp',.4],4:['hemp',.9],5:['hemp',.8],...MAIZE}, om:.9, n:.8, deep:.3, income:.4, machine:true,
-    why:{th:'ปุ๋ยพืชสด เพิ่มอินทรียวัตถุและ N คลุมดินช่วงต้นฝน',en:'Green manure adds organic matter and N and covers soil in the early rains'},
-    benefit:{th:'บำรุงดินมากที่สุด ทนแล้งกว่าถั่วเขียว ลดดินพังทลาย',en:'Largest soil benefit, more drought-tolerant than mung bean, less erosion'},
-    gap:{th:'อินทรียวัตถุในดินจริงจากการตรวจดิน ต้นทุนเมล็ดและการไถกลบ',en:'Field soil test for organic matter; seed and tillage cost'},
-    risk:{th:'ไม่มีรายได้โดยตรง ต้องไถกลบให้ทันก่อนปลูกข้าวโพด',en:'No direct income; must be incorporated in time before maize'},
-    forage:{th:'ใช้ตัดเป็นอาหารสัตว์บางส่วนได้ แต่เมล็ดมีพิษต่อสัตว์บางชนิด',en:'Some foliage can be cut for fodder, but seeds are toxic to some livestock'} },
-  { id:'D', name:{th:'มันสำปะหลัง',en:'Cassava'}, m:{4:['cassava',.3],5:['cassava',.4],6:['cassava',.6],7:['cassava',.8],8:['cassava',.8],9:['cassava',.8],10:['cassava',.7],11:['cassava',.6],0:['cassava',.5],1:['cassava',.4],2:['cassava',.3]}, om:.15, n:0, deep:.4, income:.7, machine:false,
-    why:{th:'ทนแล้งและร้อน อยู่ในแปลงเกือบทั้งปี',en:'Tolerates drought and heat; occupies the field most of the year'},
-    benefit:{th:'ทนฝนทิ้งช่วง มีพืชคลุมดินเกือบตลอดปี',en:'Withstands dry spells; ground covered most of the year'},
-    gap:{th:'ราคาหัวมันสด ระยะทางถึงลานมัน',en:'Fresh-root price; distance to a buying yard'},
-    risk:{th:'ดึงธาตุอาหาร (K) ออกมาก ช่วงปลูกดินโล่ง ปลูกซ้ำทุกปีเสี่ยงเพลี้ยแป้ง',en:'Removes many nutrients (K); bare at planting; yearly repetition raises mealybug risk'},
-    forage:{th:'ใบมันแห้งใช้เสริมอาหารสัตว์ได้',en:'Dried leaves can supplement livestock feed'} },
-  { id:'E', name:{th:'ข้าวโพด + ถั่วมะแฮะแซมปลายฝน',en:'Maize + relay pigeon pea'}, m:{...MAIZE,10:['pp',.8],11:['pp',.9],0:['pp',.7],1:['pp',.5]}, om:.6, n:.7, deep:1, income:.65, machine:false, labor:true,
-    why:{th:'ถั่วมะแฮะรากลึก ใช้น้ำที่ค้างในดินหลังหมดฝน คลุมดินต่อหลังเก็บข้าวโพด',en:'Deep-rooted pigeon pea uses water left after the rains and keeps the soil covered after maize'},
-    benefit:{th:'ตรึง N เปิดช่องให้น้ำซึม ได้เมล็ดเพิ่ม',en:'Fixes N, improves infiltration, extra grain'},
-    gap:{th:'ความชื้นเขตราก (SMAP L4) ความลึกหน้าดิน ตลาดถั่วมะแฮะ',en:'Root-zone moisture (SMAP L4), soil depth, pigeon pea market'},
-    risk:{th:'ต้องใช้แรงงานปลูกแซม ถ้าดินตื้นหรือมีชั้นดาน รากลงไม่ได้',en:'Needs labour for relay planting; shallow or compacted soil blocks the roots'},
-    forage:{th:'ใบและเมล็ดเป็นอาหารสัตว์ได้ดี',en:'Leaves and grain are good fodder'} }
-];
-const PLAN_COL = ['#a7a39a','#2f7d4f','#9ab83a','#8a5a33','#5b6fb0'];
+const KC_OVERRIDE = { cassava: .8, rice_paddy: 1.2, sugarcane: 1.25 };
+const PLAN_COL = ['#a7a39a','#2f7d4f','#9ab83a','#5b6fb0','#d98a2b','#8a5a33','#7a6fb0'];
 const RNAME = [
   {th:'ป่า / ไม้ยืนต้น',en:'Forest / trees'},{th:'โล่ง / ชุมชน / น้ำ',en:'Bare / built / water'},
   {th:'พืชสองฤดู',en:'Two-season crop'},{th:'พืชฤดูเดียว (สั้น)',en:'Single short season'},{th:'พืชไร่อายุยาว',en:'Long-season crop'}
@@ -78,7 +44,7 @@ let S = null, liveMarker = null, loadSeq = 0;
 const DEFAULT_POINT = [15.18, 101.13];
 /* Used only when SoilGrids has no value at the point (water, urban, ice); flagged in the UI */
 const SOIL_DEFAULT = { ph: 6.5, om: 2, clay: 25, sand: 40, paw: 120, deepStore: 60 };
-let mapMode = 'rec', map, cellLayer, cells = [], baseLayers = {}, curBase = 'esri', tileErrors = 0;
+let mapMode = 'rec', map, gridOverlay = null, gridCanvas = null, baseLayers = {}, curBase = 'esri', tileErrors = 0;
 const charts = {};
 
 /* ---------- model ---------- */
@@ -117,10 +83,10 @@ function norm(v, low) { const mn = Math.min(...v), mx = Math.max(...v); return v
 const incomeOf = i => { const el = $('inc' + i); return el ? +el.value / 10 : R[i].income; };
 function readState() {
   const w = {}; PRIO.forEach(p => w[p.id] = +$(p.id).value);
-  return { w, rf: +$('sRain').value / 100, dT: +$('sTemp').value, irr: $('cIrr').checked, mach: $('cMach').checked, base: +$('baseSel').value };
+  return { w, rf: +$('sRain').value / 100, dT: +$('sTemp').value, irr: $('cIrr').checked, mach: $('cMach').checked, base: 0, mainCrop: $('baseSel').value, mainMonth: $('baseMonth').value };
 }
 let evCache = null, evKey = '';
-function evAll(st) { const k = st.rf + '|' + st.dT + '|' + S.lat + ',' + S.lon; if (k !== evKey) { evCache = R.map(r => evalRot(r, st.rf, st.dT)); evKey = k; } return evCache; }
+function evAll(st) { const k = st.rf + '|' + st.dT + '|' + S.lat + ',' + S.lon + '|' + planKey; if (k !== evKey) { evCache = R.map(r => evalRot(r, st.rf, st.dT)); evKey = k; } return evCache; }
 function scoreAll(st, soilBoost = 0) {
   const ev = evAll(st), w = st.w;
   const nW = norm(ev.map(e => st.irr ? e.defMean : e.defP80), true);
@@ -142,30 +108,76 @@ const sFactor = s => { const th = Math.atan(s / 100); return s < 9 ? 10.8 * Math
 /* GRID = { n, cell (m), polys: [latlngs], info: [{ slope, farm, risk }] } */
 let GRID = null, riskBreaks = [];
 const cellInfo = p => GRID.info[p];
-/* Live grid: n×n square cells of `cell` metres centred on the point; slope from the DEM sampler */
-function liveGrid(site, n = 41, cell = 60) {
-  const dLat = cell / 111320, dLon = cell / (111320 * Math.cos(site.lat * Math.PI / 180)), h = (n - 1) / 2, polys = [], info = [];
+/* Live grid: n×n square cells of `cell` metres centred on the point (default 133 × 30 m ≈ 4 km).
+   Slope comes from the DEM (~20–30 m). Each cell also takes the low-season cover of the 250 m MODIS pixel it falls in,
+   so all layers share one grid (harmonised resolution). Drawn as a single image, not thousands of polygons. */
+function liveGrid(site, n = 133, cell = 30) {
+  const dLat = cell / 111320, dLon = cell / (111320 * Math.cos(site.lat * Math.PI / 180)), h = (n - 1) / 2, info = [];
+  const A = site.ndvi && site.ndvi.area;
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
     const la = site.lat + (h - r) * dLat, lo = site.lon + (c - h) * dLon;
-    polys.push([[la + dLat / 2, lo - dLon / 2], [la + dLat / 2, lo + dLon / 2], [la - dLat / 2, lo + dLon / 2], [la - dLat / 2, lo - dLon / 2]]);
-    let slope = NaN;
-    if (site.dem) { let sum = 0; for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) sum += site.dem.slope(la + a * dLat / 3, lo + b * dLon / 3); slope = Math.round(sum / 9 * 10) / 10; }
-    info.push({ slope, risk: isNaN(slope) ? 0 : sFactor(slope), farm: !isNaN(slope), base: null });
+    const slope = site.dem ? Math.round(site.dem.slope(la, lo) * 10) / 10 : NaN;
+    let cover = null, px = -1;
+    if (A) { const m = modisPix(A, la, lo); if (m.inside) { px = m.p; const nd = A.lowNd[px]; if (nd != null) cover = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6)); } }
+    const sf = isNaN(slope) ? 0 : sFactor(slope);
+    info.push({ slope, cover, px, risk: cover == null ? sf : sf * (0.15 + 0.85 * cover), farm: !isNaN(slope) });
   }
-  return { n, cell, polys, info };
+  const bounds = [[site.lat - (h + .5) * dLat, site.lon - (h + .5) * dLon], [site.lat + (h + .5) * dLat, site.lon + (h + .5) * dLon]];
+  return { n, cell, info, bounds, dLat, dLon, lat0: site.lat + (h + .5) * dLat, lon0: site.lon - (h + .5) * dLon, hasCover: !!A };
 }
+function gridCell(lat, lon) {
+  if (!GRID) return -1;
+  const r = Math.floor((GRID.lat0 - lat) / GRID.dLat), c = Math.floor((lon - GRID.lon0) / GRID.dLon);
+  return r >= 0 && r < GRID.n && c >= 0 && c < GRID.n ? r * GRID.n + c : -1;
+}
+/* MODIS sinusoidal grid helpers (ORNL subsets give xllcorner / yllcorner / cellsize in metres) */
+const R_SIN = 6371007.181;
+function modisPix(A, lat, lon) {
+  const la = lat * Math.PI / 180, x = R_SIN * lon * Math.PI / 180 * Math.cos(la), y = R_SIN * la;
+  const c = Math.floor((x - A.xll) / A.cell), r = A.nrows - 1 - Math.floor((y - A.yll) / A.cell);
+  const cc = Math.max(0, Math.min(A.ncols - 1, c)), rr = Math.max(0, Math.min(A.nrows - 1, r));
+  return { r: rr, c: cc, p: rr * A.ncols + cc, inside: c === cc && r === rr };
+}
+function modisPolys(A) {
+  const ll = (x, y) => { const la = y / R_SIN; return [la * 180 / Math.PI, x / (R_SIN * Math.cos(la)) * 180 / Math.PI]; }, out = [];
+  for (let r = 0; r < A.nrows; r++) for (let c = 0; c < A.ncols; c++) {
+    const x0 = A.xll + c * A.cell, x1 = x0 + A.cell, y1 = A.yll + (A.nrows - r) * A.cell, y0 = y1 - A.cell;
+    out.push([ll(x0, y1), ll(x1, y1), ll(x1, y0), ll(x0, y0)]);
+  }
+  return out;
+}
+/* k-means on NDVI profiles; deterministic (seeded) k-means++ with restarts */
+function kmeans(X, k, restarts = 8) {
+  let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const d2 = (a, b) => { let v = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; v += d * d; } return v; };
+  let best = null;
+  for (let rs = 0; rs < restarts; rs++) {
+    const C = [X[Math.floor(rnd() * X.length)].slice()];
+    while (C.length < k) { const D = X.map(p => Math.min(...C.map(c => d2(p, c)))), tot = D.reduce((a, b) => a + b, 0); let r = rnd() * tot, i = 0; while (i < X.length - 1 && r > D[i]) { r -= D[i]; i++; } C.push(X[i].slice()); }
+    let lab = new Array(X.length).fill(0);
+    for (let it = 0; it < 60; it++) {
+      let ch = 0;
+      for (let p = 0; p < X.length; p++) { let bi = 0, bd = Infinity; for (let c = 0; c < k; c++) { const d = d2(X[p], C[c]); if (d < bd) { bd = d; bi = c; } } if (lab[p] !== bi) { lab[p] = bi; ch++; } }
+      for (let c = 0; c < k; c++) { const m = new Array(X[0].length).fill(0); let n = 0; for (let p = 0; p < X.length; p++) if (lab[p] === c) { n++; for (let i = 0; i < m.length; i++) m[i] += X[p][i]; } if (n) C[c] = m.map(v => v / n); }
+      if (!ch && it) break;
+    }
+    const sse = X.reduce((a, p, i) => a + d2(p, C[lab[i]]), 0);
+    if (!best || sse < best.sse) best = { C, lab, sse };
+  }
+  return best;
+}
+const KM_COL = ['#1f5e3a', '#6f9a5a', '#c8cf86', '#e2c044', '#c4763a', '#a7a39a'];
+const kmName = (A, i) => { const c = A.cents[i]; return t(`กลุ่ม ${i + 1}: NDVI เฉลี่ย ${c.mean.toFixed(2)} · ${c.amp < 0.15 ? 'เขียวคงที่ทั้งปี' : 'ขึ้นลงตามฤดู ต่ำสุด ' + MTH.th[c.lowM]}`, `Group ${i + 1}: mean NDVI ${c.mean.toFixed(2)} · ${c.amp < 0.15 ? 'steady all year' : 'seasonal, lowest in ' + MTH.en[c.lowM]}`); };
 
 /* ---------- UI build ---------- */
 function buildControls() {
   $('prioBox').innerHTML = PRIO.map(p => `<div class="ctl"><label for="${p.id}"><span>${L2(p.l)}</span><output id="o${p.id}">${$(p.id) ? $(p.id).value : p.v}</output></label><input id="${p.id}" type="range" min="0" max="5" value="${$(p.id) ? $(p.id).value : p.v}">${p.h ? `<p class="note">${L2(p.h)}</p>` : ''}</div>`).join('');
-  const bs = $('baseSel').value || '0';
-  $('baseSel').innerHTML = R.map((r, i) => `<option value="${i}"${String(i) === bs ? ' selected' : ''}>${r.id} · ${L2(r.name)}</option>`).join('');
-  const prevInc = R.map((r, i) => $('inc' + i) ? $('inc' + i).value : Math.round(r.income * 10));
-  $('incomeBox').innerHTML = R.map((r, i) => `<div class="ctl"><label for="inc${i}"><span>${r.id} · ${L2(r.name)}</span><output id="oInc${i}">${prevInc[i]}</output></label><input id="inc${i}" type="range" min="0" max="10" value="${prevInc[i]}"></div>`).join('');
-  [...PRIO.map(p => p.id), ...R.map((_, i) => 'inc' + i)].forEach(id => $(id).addEventListener('input', update));
+  if (R.length) { const keep = R.map((_, i) => $('inc' + i) ? $('inc' + i).value : null); buildIncome(); keep.forEach((v, i) => { if (v != null && $('inc' + i)) $('inc' + i).value = v; }); }
+  baseOptions();
+  PRIO.forEach(p => $(p.id).addEventListener('input', update));
   const bb = [['esri', {th:'ภาพละเอียดสูง',en:'High-res imagery'}], ['osm', {th:'แผนที่ถนน',en:'Street map'}], ['blank', {th:'ไม่มี',en:'None'}]];
   $('baseBtns').innerHTML = bb.map(([k, l]) => `<button type="button" class="btn" data-base="${k}" aria-pressed="${k === curBase}">${L2(l)}</button>`).join('');
-  const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended plan'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['slope', {th:'ความลาดชัน',en:'Slope'}], ['none', {th:'ไม่แสดง',en:'None'}]];
+  const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended plan'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['slope', {th:'ความลาดชัน',en:'Slope'}], ['km', {th:'รูปแบบพืชพรรณ (k-means)',en:'Vegetation pattern (k-means)'}], ['rules', {th:'รูปแบบ (กฎ)',en:'Pattern (rules)'}], ['none', {th:'ไม่แสดง',en:'None'}]];
   $('layerBtns').innerHTML = lb.map(([k, l]) => `<button type="button" class="btn" data-layer="${k}" aria-pressed="${k === mapMode}">${L2(l)}</button>`).join('');
   $('satBtns').innerHTML = SAT.map(o => `<button type="button" class="btn" data-sat="${o.id}" aria-pressed="${o.id === curSat}">${L2(o.l)}</button>`).join('');
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => setBase(b.dataset.base));
@@ -182,7 +194,7 @@ function setLang(l) {
   if (S.recentJSON) loadRecent(S);
   $('liveList').innerHTML = liveStatusHTML(); restoreStatus();
 }
-function renderAll() { update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); ndviNote(); }
+function renderAll() { update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); ndviNote(); siBlock(); }
 
 /* ---------- render ---------- */
 function update() {
@@ -192,7 +204,10 @@ function update() {
   R.forEach((r, i) => { const o = $('oInc' + i); if (o) o.textContent = Math.round(incomeOf(i) * 10); });
   $('oRain').textContent = (st.rf > 0 ? '+' : '') + Math.round(st.rf * 100) + '%';
   $('oTemp').textContent = '+' + st.dT.toFixed(1) + ' °C';
+  buildPlans(st);
+  if (!R.length) { $('cards').innerHTML = `<p class="note">${t('กำลังโหลดฐานข้อมูลพืชเพื่อสร้างแผน…', 'Loading the crop database to build rotations…')}</p>`; screenBlock(st); return; }
   const { ev, nW, nH, nE, soil, scores } = scoreAll(st);
+  const scr = screenBlock(st), scrBy = scr ? Object.fromEntries(scr.map(x => [x.c.id, x])) : null;
   const best = scores.indexOf(Math.max(...scores)), b0 = st.base, base = ev[b0];
   const bar = (lab, v, col) => `<div class="bar"><span>${lab}</span><i><b style="width:${Math.round(v * 100)}%;background:${col}"></b></i><em>${Math.round(v * 100)}</em></div>`;
   $('cards').innerHTML = R.map((r, i) => {
@@ -200,10 +215,13 @@ function update() {
     const d = x => i === b0 ? '' : ` <span style="color:var(--muted)">(${x >= 0 ? '+' : ''}${Math.round(x)})</span>`;
     const seq = Array.from({ length: 12 }, (_, m) => { const c = r.m[m]; return `<span style="background:${c ? CROPS[c[0]].color : 'var(--chip)'}" title="${MTH[LANG][m]}: ${c ? L2(CROPS[c[0]].name) : t('ว่าง', 'fallow')}"></span>`; }).join('');
     const tags = [];
-    if (i === b0) tags.push(`<span class="tag">${t('แผนปัจจุบัน', 'current')}</span>`);
+    if (i === b0) tags.push(`<span class="tag">${t('แผนปัจจุบัน', 'current')}${S.guess && S.guess.auto ? t(' (เดา)', ' (guessed)') : ''}</span>`);
+    if (r.kind === 'add') tags.push(`<span class="tag">${t('เติมพืช: ', 'adds: ')}${L2(ROLE[r.role])}</span>`);
+    if (r.kind === 'switch') tags.push(`<span class="tag">${t('เปลี่ยนพืชหลัก', 'switch main crop')}</span>`);
     if (i === best) tags.push(`<span class="tag best">${t('เหมาะสุดตามน้ำหนักที่เลือก', 'best for these priorities')}</span>`);
     if (r.machine && !st.mach) tags.push(`<span class="tag warn">${t('ต้องใช้เครื่องไถกลบ', 'needs tillage machinery')}</span>`);
     if (r.labor) tags.push(`<span class="tag">${t('ใช้แรงงานเพิ่ม', 'extra labour')}</span>`);
+    if (scrBy) { const badC = r.crops.filter(k => scrBy[k] && !scrBy[k].pass && (r.kind === 'current' || st.rf || st.dT)); if (badC.length) tags.push(`<span class="tag warn">${t('ไม่เหมาะกับจุดนี้: ', 'poor fit here: ')}${badC.map(k => L2(CROPS[k].name)).join(', ')}</span>`); }
     if (!st.irr && e.dryYears >= 10) tags.push(`<span class="tag warn">${t('เสี่ยงถ้าไม่มีน้ำ', 'risky without irrigation')}</span>`);
     return `<article class="card${i === best ? ' best' : ''}">
       <div class="card-head"><div><h3>${r.id} · ${L2(r.name)}</h3><div>${tags.join('')}</div></div><div class="score">${Math.round(scores[i])}</div></div>
@@ -311,6 +329,7 @@ function initMap() {
   if (!window.L) { $('map').innerHTML = `<p style="padding:16px">${t('โหลดแผนที่ไม่ได้', 'Map library failed to load')}</p>`; return; }
   map = L.map('map', { preferCanvas: true, scrollWheelZoom: false, worldCopyJump: true }).setView(DEFAULT_POINT, 12);
   map.createPane('sat').style.zIndex = 350;
+  map.createPane('gridp').style.zIndex = 380; map.getPane('gridp').style.pointerEvents = 'none';
   const onErr = () => { tileErrors++; if (tileErrors > 6) { $('tileMsg').hidden = false; $('tileMsg').textContent = t('โหลดภาพพื้นหลังไม่ได้ในหน้านี้ (ใช้ได้เมื่อเปิดผ่าน GitHub Pages)', 'Base-map tiles cannot load in this viewer (they work on the hosted site)'); } };
   baseLayers.esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' }).on('tileerror', onErr);
   baseLayers.osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).on('tileerror', onErr);
@@ -324,9 +343,9 @@ function initMap() {
 }
 function setGrid(grid) {
   GRID = grid;
-  if (cellLayer) map.removeLayer(cellLayer);
-  cellLayer = L.layerGroup().addTo(map);
-  cells = grid.polys.map((ll, p) => { const pl = L.polygon(ll, { weight: 0.2, color: '#ffffff', fillOpacity: .7, bubblingMouseEvents: false }); pl.on('click', e => cellPopup(p, e.latlng)); pl.addTo(cellLayer); return pl; });
+  if (!gridCanvas) gridCanvas = document.createElement('canvas');
+  gridCanvas.width = gridCanvas.height = grid.n;
+  if (gridOverlay) { map.removeLayer(gridOverlay); gridOverlay = null; }
   const all = grid.info.filter(x => x.farm).map(x => x.risk);
   riskBreaks = all.length ? [0.2, 0.4, 0.6, 0.8].map(q => pct(all, q)) : [0, 0, 0, 0];
   recCache.key = '';
@@ -342,7 +361,7 @@ function recFor(st) {
   const key = JSON.stringify(st) + R.map((_, i) => incomeOf(i)).join() + S.lat + ',' + S.lon;
   if (recCache.key === key) return recCache.best;
   const memo = {}; const sMed = sFactor(3);
-  const best = cells.map((_, p) => {
+  const best = GRID.info.map((_, p) => {
     const ci = cellInfo(p); if (!ci.farm) return -1;
     const boost = Math.max(-0.3, Math.min(1.5, (sFactor(ci.slope) / sMed - 1) * 0.5));
     const kb = boost.toFixed(2);
@@ -352,38 +371,59 @@ function recFor(st) {
   recCache = { key, best }; return best;
 }
 const SLOPE_BRK = [2, 5, 8, 12], SLOPE_COL = ['#e8f1d8', '#b9d98a', '#e2c044', '#e08a3c', '#a83a1e'];
+const hexRGB = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 function paintCells() {
   if (!map || !GRID || !S) return;
   const op = +$('opac').value / 100; $('oOpac').textContent = Math.round(op * 100) + '%';
-  const st = readState(); const rec = mapMode === 'rec' ? recFor(st) : null;
-  cells.forEach((pl, p) => {
-    const ci = cellInfo(p); let col = null;
+  const st = readState(); const rec = mapMode === 'rec' && R.length ? recFor(st) : null;
+  const A = S.ndvi && S.ndvi.area, img = new ImageData(GRID.n, GRID.n), cache = {};
+  GRID.info.forEach((ci, p) => {
+    let col = null;
     if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
     else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
-    else if (mapMode === 'rec') col = rec[p] >= 0 ? PLAN_COL[rec[p]] : null;
-    pl.setStyle(col ? { fillColor: col, fillOpacity: op, opacity: op > 0 ? .35 : 0 } : { fillOpacity: mapMode === 'none' ? 0 : op * .25, fillColor: '#888888', opacity: 0 });
+    else if (mapMode === 'rec') col = rec && rec[p] >= 0 ? PLAN_COL[rec[p]] : null;
+    else if (mapMode === 'km') col = A && ci.px >= 0 && A.km[ci.px] != null ? KM_COL[A.km[ci.px]] : null;
+    else if (mapMode === 'rules') col = A && ci.px >= 0 && A.rule[ci.px] >= 0 ? RCOL[A.rule[ci.px]] : null;
+    if (!col) return;
+    const c = cache[col] || (cache[col] = hexRGB(col)), k = p * 4;
+    img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2]; img.data[k + 3] = 255;
   });
+  gridCanvas.getContext('2d').putImageData(img, 0, 0);
+  const url = gridCanvas.toDataURL();
+  if (!gridOverlay) gridOverlay = L.imageOverlay(url, GRID.bounds, { opacity: op, className: 'gridimg', interactive: false, pane: 'gridp' }).addTo(map);
+  else { gridOverlay.setUrl(url); gridOverlay.setOpacity(op); }
   legend(rec);
 }
 function legend(rec) {
   const n = GRID.info.length; const count = f => { let c = 0; for (let p = 0; p < n; p++) if (f(p)) c++; return Math.round(c / n * 100) + '%'; };
   const gridNote = t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`);
   let h = '';
-  if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM), quintiles within the grid')}</p>`;
+  if (mapMode === 'km' || mapMode === 'rules') {
+    const A = S.ndvi && S.ndvi.area;
+    if (!A) h = `<p class="note">${S.ndviFailed ? t('ดึง NDVI จาก MODIS ไม่ได้ ชั้นนี้จึงไม่มีข้อมูล', 'MODIS NDVI could not be fetched, so this layer is empty') : t('กำลังดึง NDVI จาก MODIS… (~1 นาที)', 'Fetching MODIS NDVI… (~1 min)')}</p>`;
+    else {
+      const N = A.rule.length, share = f => Math.round(A.rule.filter((_, p) => f(p)).length / N * 100) + '%';
+      if (mapMode === 'km') h = A.k ? A.cents.map((_, i) => `<span><i style="background:${KM_COL[i]}"></i>${kmName(A, i)}<b>${share(p => A.km[p] === i)}</b></span>`).join('') : `<p class="note">${t('pixel ที่ใช้ได้น้อยเกินไปสำหรับ k-means', 'Too few usable pixels for k-means')}</p>`;
+      else h = RNAME.map((nm, i) => `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${share(p => A.rule[p] === i)}</b></span>`).join('');
+      h += `<p class="note">${t(`ข้อมูลจริงละเอียด 250 m (MODIS ${A.nrows}×${A.ncols} pixel, NDVI 1 ปีล่าสุด) วางลงกริด 30 m ให้ตรงกับชั้นอื่น ไม่ได้ละเอียดขึ้นจริง`, `True resolution is 250 m (MODIS ${A.nrows}×${A.ncols} pixels, last year of NDVI), placed on the 30 m grid to line up with the other layers; it is not actually finer`)}</p>`;
+    }
+    $('legend').innerHTML = h; return;
+  }
+  if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${(GRID.hasCover ? t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM 30 m) × พืชคลุมดินช่วงต่ำสุด (MODIS 250 m ปรับลงกริดเดียวกัน) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM, 30 m) × low-season ground cover (MODIS 250 m resampled to the same grid), quintiles within the grid') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด · จะคูณด้วยพืชคลุมดินเมื่อ NDVI โหลดเสร็จ', 'RUSLE slope factor S (SRTM), quintiles within the grid · ground cover is applied once NDVI has loaded'))}</p>`;
   else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
+  else if (mapMode === 'rec' && !rec) h = `<p class="note">${t('กำลังสร้างแผน…', 'Building rotations…')}</p>`;
   else if (mapMode === 'rec' && rec) h = R.map((r, i) => `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
   $('legend').innerHTML = h + `<p class="note">${gridNote}</p>`;
 }
-function cellPopup(p, ll) {
-  const ci = cellInfo(p), st = readState();
+function cellHTML(p) {
+  const ci = cellInfo(p), st = readState(), A = S.ndvi && S.ndvi.area;
   const lvl = [t('ต่ำมาก', 'very low'), t('ต่ำ', 'low'), t('ปานกลาง', 'medium'), t('สูง', 'high'), t('สูงมาก', 'very high')][riskBreaks.filter(b => ci.risk > b).length];
-  let h = `<b>${fmtLL(ll.lat, ll.lng)}</b><br>`;
-  h += `${t('ความลาดชัน', 'Slope')}: ${isNaN(ci.slope) ? '—' : ci.slope + '%'}`;
-  if (ci.farm) {
-    const rec = recFor(st)[p], base = st.base;
-    h += `<br>${t('เสี่ยงดินพัง', 'Erosion risk')}: ${lvl}<br>${t('แผนปัจจุบัน', 'Current')}: ${R[base].id} · ${L2(R[base].name)}<br><b>${t('แนะนำ', 'Suggested')}: ${R[rec].id} · ${L2(R[rec].name)}</b>`;
-  } else h += `<br>${t('ไม่มีข้อมูลความสูงของช่องนี้', 'No elevation data for this cell')}`;
-  L.popup().setLatLng(ll).setContent(h).openOn(map);
+  let h = `${t('ความลาดชัน', 'Slope')}: ${isNaN(ci.slope) ? '—' : ci.slope + '%'}`;
+  if (ci.farm) h += `<br>${t('เสี่ยงดินพัง', 'Erosion risk')}: ${lvl}`;
+  if (ci.cover != null) h += `<br>${t('พืชคลุมดินช่วงต่ำสุด', 'Low-season cover')}: ${Math.round((1 - ci.cover) * 100)}%`;
+  if (A && ci.px >= 0 && A.rule[ci.px] >= 0) h += `<br>${t('รูปแบบ (กฎ)', 'Pattern (rules)')}: ${L2(RNAME[A.rule[ci.px]])}` + (A.km[ci.px] != null ? `<br>k-means: ${kmName(A, A.km[ci.px])}` : '');
+  if (ci.farm && R.length) { const rec = recFor(st)[p]; if (rec >= 0) h += `<br><b>${t('แนะนำ', 'Suggested')}: ${R[rec].id} · ${L2(R[rec].name)}</b>`; }
+  return h;
 }
 function links() {
   const d = $('gibsDate').value;
@@ -408,6 +448,8 @@ function drawCharts() {
     { label: t('ค่าดิบ (ผ่านการกรองเมฆ)', 'Raw (cloud-screened)'), data: S.ndvi.raw, borderColor: 'transparent', backgroundColor: css('--muted'), pointRadius: 3, showLine: false },
     { label: t('เกณฑ์ดินโล่ง 0.3', 'Bare-soil threshold 0.3'), data: S.ndvi.dates.map(() => .3), borderColor: css('--soil'), borderDash: [5, 4], pointRadius: 0 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { min: 0, max: 1 }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: lg } });
+  { const A = S.ndvi && S.ndvi.area; if (A && A.k) charts.prof = new Chart($('cProf'), { type: 'line', data: { labels: S.ndvi.dates.map(d => `${+d.slice(8, 10)} ${MTH[LANG][+d.slice(5, 7) - 1]}`), datasets: A.cents.map((c, i) => ({ label: kmName(A, i), data: c.prof, borderColor: KM_COL[i], backgroundColor: KM_COL[i], pointRadius: 0, tension: .3, borderWidth: 2 })) },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { min: 0, max: 1 }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } } } } }); }
   charts.trend = new Chart($('cTrend'), { data: { labels: S.annual.map(a => a[0]), datasets: [
     { type: 'bar', label: t('ฝนรายปี (mm)', 'Annual rain (mm)'), data: S.annual.map(a => a[1]), backgroundColor: css('--water'), yAxisID: 'y' },
     { type: 'line', label: t('วัน ≥35 °C', 'Days ≥35 °C'), data: S.annual.map(a => a[3]), borderColor: css('--heat'), backgroundColor: css('--heat'), pointRadius: 2, yAxisID: 'y2' }] },
@@ -526,10 +568,11 @@ function onMapClick(e) {
   const lat = e.latlng.lat, lng = ((e.latlng.lng + 540) % 360) - 180;
   const box = document.createElement('div');
   const head = document.createElement('b'); head.textContent = fmtLL(lat, lng);
+  const p = S ? gridCell(lat, lng) : -1, infoEl = document.createElement('div'); if (p >= 0) infoEl.innerHTML = cellHTML(p);
   const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.style.marginTop = '6px'; btn.style.display = 'block';
   btn.textContent = t('วิเคราะห์จุดนี้', 'Analyse this point');
   L.DomEvent.on(btn, 'click', ev => { L.DomEvent.stop(ev); map.closePopup(); loadLive(lat, lng); });
-  box.append(head, btn);
+  box.append(head, infoEl, btn);
   L.popup().setLatLng(e.latlng).setContent(box).openOn(map);
 }
 async function loadLive(lat, lon) {
@@ -594,31 +637,198 @@ function classifyNdvi(a) {
   if (mn >= 0.55) return 0; if (mx < 0.35) return 1; if (pk >= 2) return 2; if (len <= 9) return 3; return 4;
 }
 async function loadNdvi(site) {
-  if (site.ndvi || site.ndviFailed) { setStatus('ndvi', site.ndvi ? 'ok' : 'err', () => site.ndvi ? L2(RNAME[site.ndvi.cls]) : t('ดึงไม่ได้', 'failed')); if (site === S) { drawCharts(); ndviNote(); update(); } return; }
-  setStatus('ndvi', 'load', () => t('~1 นาที', '~1 min')); if (site === S) ndviNote();
+  const after = () => { if (site !== S) return; if (map) setGrid(liveGrid(S)); drawCharts(); ndviNote(); siBlock(); update(); };
+  if (site.ndvi || site.ndviFailed) { setStatus('ndvi', site.ndvi ? 'ok' : 'err', () => site.ndvi ? L2(RNAME[site.ndvi.cls]) : t('ดึงไม่ได้', 'failed')); after(); return; }
+  setStatus('ndvi', 'load', () => t('~1 นาที', '~1 min')); if (site === S) { ndviNote(); siBlock(); }
   try {
+    /* ±2 km around the point = about 17×17 MODIS pixels, in the same number of requests as a single pixel */
     const ds = modisDates(), chunks = []; for (let i = 0; i < ds.length; i += 10) chunks.push(ds.slice(i, i + 10));
-    const url = (band, ch) => `https://modis.ornl.gov/rst/api/v1/MOD13Q1/subset?latitude=${site.lat.toFixed(5)}&longitude=${site.lon.toFixed(5)}&band=${band}&startDate=${ch[0].a}&endDate=${ch.at(-1).a}&kmAboveBelow=0&kmLeftRight=0`;
-    const get = band => Promise.all(chunks.map(ch => getJSON(url(band, ch), 120000, { headers: { Accept: 'application/json' } }).then(j => j.subset || [])));
-    const [nd, rl] = await Promise.all([get('250m_16_days_NDVI'), get('250m_16_days_pixel_reliability')]);
-    const rel = new Map(rl.flat().map(x => [x.modis_date, x.data[0]]));
-    const rows = nd.flat().sort((a, b) => a.modis_date < b.modis_date ? -1 : 1).map(x => { const v = x.data[0], q = rel.get(x.modis_date); return { d: x.calendar_date, v: (q === 0 || q === 1) && v > -2000 ? v * 1e-4 : null }; });
-    const good = rows.filter(r => r.v != null);
-    if (rows.length < 12 || good.length < 6) throw new Error('too few clear observations');
-    const raw = rows.map(r => r.v), x = raw.slice();
-    let last = -1;
-    for (let i = 0; i < x.length; i++) if (x[i] != null) { if (last < 0) for (let k = 0; k < i; k++) x[k] = x[i]; else for (let k = last + 1; k < i; k++) x[k] = x[last] + (x[i] - x[last]) * (k - last) / (i - last); last = i; }
-    for (let k = last + 1; k < x.length; k++) x[k] = x[last];
-    const smooth = x.map((v, i) => i === 0 || i === x.length - 1 ? v : 0.25 * x[i - 1] + 0.5 * v + 0.25 * x[i + 1]);
-    const byMonth = Array.from({ length: 12 }, () => []); rows.forEach((r, i) => byMonth[+r.d.slice(5, 7) - 1].push(smooth[i]));
-    const mMean = byMonth.map(a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN);
-    const order = mMean.map((v, m) => [v, m]).filter(p => !isNaN(p[0])).sort((a, b) => a[0] - b[0]);
+    const url = (band, ch) => `https://modis.ornl.gov/rst/api/v1/MOD13Q1/subset?latitude=${site.lat.toFixed(5)}&longitude=${site.lon.toFixed(5)}&band=${band}&startDate=${ch[0].a}&endDate=${ch.at(-1).a}&kmAboveBelow=2&kmLeftRight=2`;
+    const get = band => Promise.all(chunks.map(ch => getJSON(url(band, ch), 150000, { headers: { Accept: 'application/json' } })));
+    const [ndJ, rlJ] = await Promise.all([get('250m_16_days_NDVI'), get('250m_16_days_pixel_reliability').catch(() => null)]);
+    const meta = ndJ.find(x => x && x.subset && x.subset.length); if (!meta) throw new Error('no data');
+    const nrows = +meta.nrows, ncols = +meta.ncols, N = nrows * ncols;
+    const nd = ndJ.flatMap(x => x.subset || []).sort((a, b) => a.modis_date < b.modis_date ? -1 : 1);
+    const rel = rlJ ? new Map(rlJ.flatMap(x => x.subset || []).map(x => [x.modis_date, x.data])) : null;
+    if (nd.length < 12) throw new Error('too few composites');
+    const dates = nd.map(x => x.calendar_date);
+    const series = p => {
+      const raw = nd.map(x => { const v = x.data[p], q = rel && rel.get(x.modis_date); return (!q || q[p] === 0 || q[p] === 1) && v > -2000 ? v * 1e-4 : null; });
+      const clear = raw.filter(v => v != null).length; if (clear < 6) return { raw, clear, smooth: null };
+      const x = raw.slice(); let last = -1;
+      for (let i = 0; i < x.length; i++) if (x[i] != null) { if (last < 0) for (let k = 0; k < i; k++) x[k] = x[i]; else for (let k = last + 1; k < i; k++) x[k] = x[last] + (x[i] - x[last]) * (k - last) / (i - last); last = i; }
+      for (let k = last + 1; k < x.length; k++) x[k] = x[last];
+      return { raw, clear, smooth: x.map((v, i) => i === 0 || i === x.length - 1 ? v : 0.25 * x[i - 1] + 0.5 * v + 0.25 * x[i + 1]) };
+    };
+    const px = Array.from({ length: N }, (_, p) => series(p));
+    const cen = px[Math.floor(nrows / 2) * ncols + Math.floor(ncols / 2)];
+    if (!cen.smooth) throw new Error('too few clear observations');
+    const monthMean = sm => { const by = Array.from({ length: 12 }, () => []); dates.forEach((d, i) => by[+d.slice(5, 7) - 1].push(sm[i])); return by.map(a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN); };
+    const lowOf = sm => { const a = [...sm].sort((x, y) => x - y).slice(0, 4); return a.reduce((s, v) => s + v, 0) / a.length; };
+    const mMean = monthMean(cen.smooth), order = mMean.map((v, m) => [v, m]).filter(p => !isNaN(p[0])).sort((a, b) => a[0] - b[0]);
     const lowM = order[0][1], lowMonths = [lowM, (lowM + 1) % 12].filter(m => !isNaN(mMean[m]) && mMean[m] <= order[0][0] + 0.08);
-    site.ndvi = { dates: rows.map(r => r.d), raw, smooth: smooth.map(v => +v.toFixed(3)), cls: classifyNdvi(smooth), min: Math.min(...smooth), max: Math.max(...smooth), clear: good.length, total: rows.length,
-      bareMonths: mMean.map((v, m) => v < 0.3 ? m : -1).filter(m => m >= 0), lowMonths };
+    /* Two classifications of every pixel: fixed phenology rules, and k-means on the NDVI profiles */
+    const rule = px.map(q => q.smooth ? classifyNdvi(q.smooth) : -1), valid = px.map((q, p) => q.smooth ? p : -1).filter(p => p >= 0);
+    const area = { nrows, ncols, cell: +meta.cellsize, xll: +meta.xllcorner, yll: +meta.yllcorner, rule, km: new Array(N).fill(null), lowNd: px.map(q => q.smooth ? lowOf(q.smooth) : null), k: 0, cents: [], agree: null, valid: valid.length, noQA: !rel };
+    const k = Math.min(5, Math.floor(valid.length / 8));
+    if (k >= 2) {
+      const res = kmeans(valid.map(p => px[p].smooth), k);
+      const ord = res.C.map((c, i) => [c.reduce((a, b) => a + b, 0) / c.length, i]).sort((a, b) => b[0] - a[0]).map(x => x[1]), pos = []; ord.forEach((o, i) => pos[o] = i);
+      valid.forEach((p, i) => area.km[p] = pos[res.lab[i]]);
+      area.cents = ord.map(o => { const c = res.C[o], mm = monthMean(c), lo = mm.map((v, m) => [v, m]).filter(q => !isNaN(q[0])).sort((a, b) => a[0] - b[0])[0][1]; return { prof: c.map(v => +v.toFixed(3)), mean: c.reduce((a, b) => a + b, 0) / c.length, amp: Math.max(...c) - Math.min(...c), lowM: lo, rule: classifyNdvi(c) }; });
+      let agreeN = 0; for (let c = 0; c < k; c++) { const cnt = new Array(5).fill(0); valid.forEach(p => { if (area.km[p] === c) cnt[rule[p]]++; }); agreeN += Math.max(...cnt); }
+      area.k = k; area.agree = agreeN / valid.length; area.sse = res.sse;
+    }
+    site.ndvi = { dates, raw: cen.raw, smooth: cen.smooth.map(v => +v.toFixed(3)), cls: classifyNdvi(cen.smooth), min: Math.min(...cen.smooth), max: Math.max(...cen.smooth), clear: cen.clear, total: dates.length,
+      bareMonths: mMean.map((v, m) => v < 0.3 ? m : -1).filter(m => m >= 0), lowMonths, area };
     setStatus('ndvi', 'ok', () => L2(RNAME[site.ndvi.cls]));
   } catch (e) { site.ndviFailed = e.message || 'error'; setStatus('ndvi', 'err', () => t('ดึงไม่ได้', 'failed')); }
-  if (site === S) { drawCharts(); ndviNote(); update(); }
+  after();
+}
+/* SI section: k-means vs rules for the pixels around the point */
+function siBlock() {
+  const el = $('siBody'); if (!el || !S) return;
+  const A = S.ndvi && S.ndvi.area;
+  $('cProf').closest('.chartbox').style.display = A && A.k ? '' : 'none';
+  if (!A) { el.innerHTML = `<p class="note">${S.ndviFailed ? t('ดึง NDVI จาก MODIS ไม่ได้ จึงเทียบ 2 วิธีที่จุดนี้ไม่ได้', 'MODIS NDVI could not be fetched, so the two methods cannot be compared here') : t('กำลังดึง NDVI ของ pixel รอบจุดนี้จาก MODIS… (~1 นาที)', 'Fetching MODIS NDVI for the pixels around this point… (~1 min)')}</p>`; return; }
+  const row = (a, b, c) => `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`;
+  const ruleShare = RNAME.map((nm, i) => [L2(nm), A.rule.filter(v => v === i).length]).filter(x => x[1]).sort((a, b) => b[1] - a[1]).map(x => `${x[0]} ${Math.round(x[1] / A.rule.length * 100)}%`).join(' · ');
+  el.innerHTML = `<div class="tbl"><table>
+    <thead><tr><th></th><th>k-means${A.k ? ` (k=${A.k})` : ''}</th><th>${t('กฎ phenology', 'Phenology rules')}</th></tr></thead><tbody>
+    ${row(t('หลักการ', 'Idea'), t('จัดกลุ่ม pixel ที่กราฟ NDVI 1 ปีคล้ายกัน ไม่ต้องมีป้ายกำกับ', 'Groups pixels with similar 1-year NDVI curves; no labels needed'), t('เกณฑ์ตายตัว: NDVI ต่ำสุด สูงสุด จำนวนพีค ความยาวฤดู', 'Fixed thresholds: min / max NDVI, peak count, season length'))}
+    ${row(t('ข้อดี', 'Strength'), t('แยกระดับความหนาแน่นของพืชได้ ปรับตามพื้นที่เอง', 'Separates canopy-density levels; adapts to the place'), t('อธิบายได้ทันที ใช้ได้กับ pixel เดียว', 'Directly interpretable; works on a single pixel'))}
+    ${row(t('ข้อเสีย', 'Weakness'), t('ต้องตีความกลุ่มเอง และ pixel น้อยผลจะหยาบ', 'Groups need interpreting; coarse with few pixels'), t('เกณฑ์เดียวใช้ทั้งโลก pixel ปนถูกรวมกลุ่ม', 'One set of thresholds worldwide; mixed pixels collapse'))}
+    ${row(t('ผลที่จุดนี้', 'Result here'), A.k ? A.cents.map((_, i) => `${kmName(A, i)} (${Math.round(A.km.filter(v => v === i).length / A.rule.length * 100)}%)`).join('<br>') : t('pixel ที่ใช้ได้น้อยเกินไป', 'too few usable pixels'), ruleShare)}
+    <tr><td>${t('ผลตรงกัน', 'Agreement')}</td><td colspan="2">${A.agree == null ? '—' : `<b>${Math.round(A.agree * 100)}%</b> ` + t('ของ pixel (แต่ละกลุ่ม k-means จับคู่กับคลาสกฎที่พบมากสุด)', 'of pixels (each k-means group matched to its most common rule class)')}</td></tr>
+    </tbody></table></div>
+    <p class="note" style="margin-top:6px">${t(`MODIS MOD13Q1 250 m · ${A.nrows}×${A.ncols} pixel (ใช้ได้ ${A.valid}) · ดูผลบนแผนที่ที่ชั้น "รูปแบบพืชพรรณ (k-means)" และ "รูปแบบ (กฎ)" · ทั้งสองวิธีบอกรูปแบบความเขียว ไม่ได้บอกชื่อพืช`, `MODIS MOD13Q1 250 m · ${A.nrows}×${A.ncols} pixels (${A.valid} usable) · see both on the map layers "Vegetation pattern (k-means)" and "Pattern (rules)" · both describe greenness patterns, not crop names`)}${A.noQA ? t(' · ไม่ได้กรองเมฆ (ดึงแถบคุณภาพไม่ได้)', ' · not cloud-screened (quality band unavailable)') : ''}</p>`;
+}
+
+/* ---------- crop screening: ECOCROP ranges × NASA POWER climate × soil pH ---------- */
+let CROPDB = null;
+const ROLE = { nfix: { th: 'ตรึง N', en: 'N-fixing' }, cover: { th: 'คลุมดิน', en: 'cover' }, deep: { th: 'รากลึก', en: 'deep roots' }, drought: { th: 'ทนแล้ง', en: 'drought-tolerant' } };
+const trap = (v, a, b, c, d) => v <= a || v >= d ? 0 : v < b ? (v - a) / (b - a) : v <= c ? 1 : (d - v) / (d - c);
+function siteTP(st) {
+  if (!S.tmean) { const sum = new Array(12).fill(0), n = new Array(12).fill(0); for (const d of S.days) { sum[d.m] += (d.tx + d.tn) / 2; n[d.m]++; } S.tmean = sum.map((v, m) => v / n[m]); }
+  return { T: S.tmean.map(v => v + st.dT), P: S.clim.map(c => c[0] * (1 + st.rf)), ph: S.soil.ph, irr: st.irr };
+}
+const cycleMonths = c => Math.max(1, Math.min(12, Math.round(c.days / 30)));
+/* Fit of crop c sown in month s0: min of three ECOCROP trapezoids (monthly temperature, rain over the cycle, soil pH).
+   ECOCROP rain limits describe a typical full cycle; they are scaled when our cycle is shorter (assumption, floor 0.3). */
+function fitAt(c, s0, E) {
+  const nm = cycleMonths(c), f = Math.min(1, Math.max(0.3, c.days / ((c.gmin + c.gmax) / 2)));
+  const ms = Array.from({ length: nm }, (_, i) => (s0 + i) % 12);
+  let ts = 1, tm = ms[0]; for (const m of ms) { const v = trap(E.T[m], c.tmin, c.topmn, c.topmx, c.tmax); if (v < ts) { ts = v; tm = m; } }
+  const rain = ms.reduce((a, m) => a + E.P[m], 0);
+  let rs = trap(rain, c.rmin * f, c.ropmn * f, c.ropmx * f, c.rmax * f); if (E.irr && rain < c.ropmn * f) rs = 1;
+  const ps = trap(E.ph, c.phmin, c.phopmn, c.phopmx, c.phmax), suit = Math.min(ts, rs, ps);
+  let why = null;
+  if (suit < 1) {
+    if (ts <= rs && ts <= ps) { const v = E.T[tm]; why = v > c.topmx ? { th: `${MTH.th[tm]} ร้อนเกิน (${v.toFixed(0)} °C, เหมาะสุดไม่เกิน ${c.topmx})`, en: `${MTH.en[tm]} too hot (${v.toFixed(0)} °C, optimum ≤ ${c.topmx})` } : { th: `${MTH.th[tm]} เย็นเกิน (${v.toFixed(0)} °C, เหมาะสุดตั้งแต่ ${c.topmn})`, en: `${MTH.en[tm]} too cool (${v.toFixed(0)} °C, optimum ≥ ${c.topmn})` }; }
+    else if (rs <= ps) why = rain < c.ropmn * f ? { th: `ฝนช่วงปลูกน้อยเกิน (${Math.round(rain)} mm, ต้องการ ≥ ${Math.round(c.ropmn * f)})`, en: `too little rain in the cycle (${Math.round(rain)} mm, needs ≥ ${Math.round(c.ropmn * f)})` } : { th: `ฝนช่วงปลูกมากเกิน (${Math.round(rain)} mm, เหมาะสุด ≤ ${Math.round(c.ropmx * f)})`, en: `too much rain in the cycle (${Math.round(rain)} mm, optimum ≤ ${Math.round(c.ropmx * f)})` };
+    else why = { th: `pH ดิน ${E.ph} อยู่นอกช่วงเหมาะสุด ${c.phopmn}–${c.phopmx}`, en: `soil pH ${E.ph} outside the optimum ${c.phopmn}–${c.phopmx}` };
+  }
+  return { c, suit, start: s0, nm, ts, rs, ps, tm, rain, f, why, pass: suit >= 0.5 };
+}
+function screenCrops(st) {
+  if (!CROPDB || !S) return null;
+  const E = siteTP(st);
+  return CROPDB.map(c => { let best = null; for (let s0 = 0; s0 < 12; s0++) { const r = fitAt(c, s0, E); if (!best || r.suit > best.suit) best = r; } return best; }).sort((a, b) => b.suit - a.suit);
+}
+/* ---------- rotation builder: current crop + screened crops that fit the idle window ---------- */
+const winTxt = (s0, nm, lang) => nm >= 12 ? (lang === 'th' ? 'ทั้งปี' : 'all year') : `${MTH[lang][s0]}–${MTH[lang][(s0 + nm - 1) % 12]}`;
+function kcSeq(c, nm) {
+  const mid = KC_OVERRIDE[c.id] || TYPE[c.type].kc, end = c.type === 'cover' || c.type === 'forage' ? mid * .9 : .6;
+  if (nm === 1) return [mid * .8]; if (nm === 2) return [.6, mid];
+  return Array.from({ length: nm }, (_, i) => i === 0 ? .4 : i === nm - 1 ? end : mid);
+}
+function makePlan(parts, kind, role) {
+  const m = {}; parts.forEach(pt => kcSeq(pt.c, pt.nm).forEach((kc, i) => { m[(pt.start + i) % 12] = [pt.c.id, kc]; }));
+  const main = parts[0], add = parts[1], comb = k => 1 - parts.reduce((a, pt) => a * (1 - pt.c[k]), 1);
+  const nameOf = l => parts.map(pt => `${pt.c[l]} (${winTxt(pt.start, pt.nm, l)})`).join(' + ');
+  const idle = 12 - Object.keys(m).length, rolesOf = (c, l) => c.roles.filter(x => ROLE[x]).map(x => ROLE[x][l]).join(', ');
+  const p = { kind, role, parts, crops: parts.map(pt => pt.c.id), m, name: { th: nameOf('th'), en: nameOf('en') }, om: comb('om'), n: comb('n'), deep: Math.max(...parts.map(pt => pt.c.deep)),
+    income: Math.min(1, main.c.income + (add ? .35 * add.c.income : 0)), machine: !!add && add.c.type === 'cover', labor: !!add && add.c.type !== 'cover' };
+  const forage = c => c.type === 'legume' || c.type === 'cover' || c.type === 'forage' ? { th: `${c.th}: ใบและต้นใช้เป็นอาหารสัตว์ได้ (ตรวจชนิดก่อน บางชนิดเมล็ดเป็นพิษ)`, en: `${c.en}: foliage can be used as fodder (check the species; some seeds are toxic)` } : { th: `${c.th}: เศษซากหลังเก็บเกี่ยวใช้เลี้ยงสัตว์หรือคลุมดินได้`, en: `${c.en}: residues can feed livestock or mulch the soil` };
+  p.forage = forage((add || main).c);
+  if (kind === 'current') {
+    p.why = { th: 'พืชที่ปลูกอยู่ตอนนี้ ใช้เป็นเส้นฐานในการเทียบ', en: 'What is grown now; the baseline for comparison' };
+    p.benefit = { th: 'คุ้นเคย มีตลาดและเครื่องมืออยู่แล้ว', en: 'Familiar, with an existing market and equipment' };
+    p.gap = { th: 'ผลผลิตและราคาจริงของแปลง เดือนปลูกจริง', en: 'Actual field yield and price; actual sowing month' };
+    p.risk = idle > 0 ? { th: `แปลงว่าง ${idle} เดือน เสี่ยงดินพังและวัชพืช ปลูกพืชเดิมซ้ำทำให้ศัตรูพืชสะสม${main.why ? ' · ' + main.why.th : ''}`, en: `Field idle for ${idle} months: erosion and weeds; repeating one crop builds up pests${main.why ? ' · ' + main.why.en : ''}` } : { th: 'พืชเดิมอยู่ในแปลงทั้งปี ศัตรูพืชและโรคสะสม ดึงธาตุอาหารต่อเนื่อง', en: 'One crop occupies the field all year: pests and disease build up, nutrients are drawn down' };
+  } else if (kind === 'add') {
+    p.why = { th: `เติม ${add.c.th} (${rolesOf(add.c, 'th')}) ในช่วงแปลงว่าง ${winTxt(add.start, add.nm, 'th')} · เข้ากับอากาศช่วงนั้น ${Math.round(add.suit * 100)}%`, en: `Adds ${add.c.en} (${rolesOf(add.c, 'en')}) in the idle window ${winTxt(add.start, add.nm, 'en')} · ${Math.round(add.suit * 100)}% fit to that season` };
+    const b = { nfix: { th: 'ตรึงไนโตรเจนให้พืชรอบถัดไป ลดปุ๋ย', en: 'fixes nitrogen for the next crop, less fertiliser' }, cover: { th: 'คลุมดินช่วงที่เคยว่าง ลดดินพัง เพิ่มอินทรียวัตถุ', en: 'covers soil that used to be bare, less erosion, more organic matter' }, deep: { th: 'รากลึกใช้น้ำชั้นล่างและช่วยให้น้ำซึมดีขึ้น', en: 'deep roots use stored water and improve infiltration' }, drought: { th: 'ทนฝนทิ้งช่วง', en: 'tolerates dry spells' } };
+    p.benefit = { th: add.c.roles.filter(x => b[x]).map(x => b[x].th).join(' · ') + ' · เปลี่ยนวงศ์พืช ตัดวงจรศัตรูพืช', en: add.c.roles.filter(x => b[x]).map(x => b[x].en).join(' · ') + ' · a different plant family breaks pest cycles' };
+    p.gap = { th: `พันธุ์และตลาดของ${add.c.th}ในพื้นที่ · ผลตรวจดินในแปลง · ความชื้นดินตอนปลูกจริง`, en: `Local varieties and market for ${add.c.en} · a field soil test · actual soil moisture at sowing` };
+    p.risk = { th: `${add.why ? add.why.th + ' · ' : ''}${p.machine ? 'ต้องไถกลบให้ทันก่อนพืชหลัก ไม่มีรายได้โดยตรง' : 'ต้องใช้แรงงานและเมล็ดพันธุ์เพิ่ม'} · ช่วงเปลี่ยนพืชต้องไม่ชนกับเก็บเกี่ยวพืชหลัก`, en: `${add.why ? add.why.en + ' · ' : ''}${p.machine ? 'must be incorporated in time before the main crop; no direct income' : 'needs extra labour and seed'} · the changeover must not clash with the main harvest` };
+  } else {
+    p.why = { th: `เปลี่ยนพืชหลักเป็น ${main.c.th}${rolesOf(main.c, 'th') ? ' (' + rolesOf(main.c, 'th') + ')' : ''} ซึ่งเข้ากับอากาศของจุดนี้ ${Math.round(main.suit * 100)}%`, en: `Switches the main crop to ${main.c.en}${rolesOf(main.c, 'en') ? ' (' + rolesOf(main.c, 'en') + ')' : ''}, a ${Math.round(main.suit * 100)}% fit to this climate` };
+    p.benefit = { th: 'ทางเลือกเมื่อพืชเดิมเสี่ยงขึ้นจากอากาศที่เปลี่ยน · เปลี่ยนวงศ์พืชช่วยตัดวงจรศัตรูพืช', en: 'An option when the current crop becomes riskier as climate shifts · a new family breaks pest cycles' };
+    p.gap = { th: `ตลาด ราคา และพันธุ์ของ${main.c.th}ในพื้นที่ · ต้นทุนเปลี่ยนเครื่องมือ`, en: `Local market, price and varieties for ${main.c.en} · cost of changing equipment` };
+    p.risk = { th: `${main.why ? main.why.th + ' · ' : ''}การเปลี่ยนพืชหลักต้องมีตลาดรองรับและความรู้ใหม่ ควรลองบางส่วนของแปลงก่อน`, en: `${main.why ? main.why.en + ' · ' : ''}switching the main crop needs a market and new know-how; trial it on part of the field first` };
+  }
+  return p;
+}
+function buildPlans(st) {
+  if (!CROPDB || !S) return;
+  const key = [S.lat, S.lon, st.mainCrop, st.mainMonth, st.irr].join('|');
+  if (key === planKey) return;
+  const E = siteTP({ rf: 0, dT: 0, irr: st.irr }), scr = screenCrops({ rf: 0, dT: 0, irr: st.irr }), by = Object.fromEntries(scr.map(x => [x.c.id, x]));
+  const cash = x => !['cover', 'forage'].includes(x.c.type);
+  /* current crop: the user's choice, else a guess = best-fitting grain / root / cash crop */
+  const guess = scr.filter(cash).sort((a, b) => b.suit - a.suit || CROPDB.indexOf(a.c) - CROPDB.indexOf(b.c))[0];
+  const mainC = (st.mainCrop && by[st.mainCrop] ? by[st.mainCrop] : guess).c;
+  const main = st.mainMonth !== 'auto' ? fitAt(mainC, +st.mainMonth, E) : by[mainC.id];
+  S.guess = { id: mainC.id, auto: !st.mainCrop, start: main.start };
+  const plans = [makePlan([main], 'current')], used = new Set([mainC.id]);
+  const busy = new Set(Array.from({ length: main.nm }, (_, i) => (main.start + i) % 12)), idleLen = 12 - main.nm, idle0 = (main.start + main.nm) % 12;
+  for (const role of ['nfix', 'cover', 'deep', 'drought']) {
+    let best = null;
+    for (const x of scr) {
+      const c = x.c; if (used.has(c.id) || !c.roles.includes(role) || c.fam === mainC.fam) continue;
+      const nm = cycleMonths(c); if (nm > idleLen) continue;
+      for (let o = 0; o + nm <= idleLen; o++) { const r = fitAt(c, (idle0 + o) % 12, E); if (!r.pass) continue; const sc = r.suit + .15 * (c.om + c.n) + (role === 'deep' ? .2 * c.deep : 0); if (!best || sc > best.sc) best = { r, sc }; }
+    }
+    if (best) { used.add(best.r.c.id); plans.push(makePlan([main, best.r], 'add', role)); }
+  }
+  const sw = scr.filter(x => x.pass && cash(x) && !used.has(x.c.id));
+  const pick = f => sw.filter(f).sort((a, b) => b.suit - a.suit || b.c.income - a.c.income)[0];
+  for (const f of [x => x.c.roles.includes('drought') && x.c.fam !== mainC.fam, x => x.c.roles.includes('nfix'), x => true]) {
+    if (plans.length >= 6 || (plans.length >= 4 && plans.some(p => p.kind === 'switch'))) break;
+    const x = pick(y => f(y) && !used.has(y.c.id)); if (x) { used.add(x.c.id); plans.push(makePlan([x], 'switch')); }
+  }
+  plans.forEach((p, i) => p.id = 'ABCDEFG'[i]);
+  R = plans; planKey = key; evKey = ''; recCache.key = '';
+  CROPS = {}; CROPDB.forEach(c => CROPS[c.id] = { name: { th: c.th, en: c.en }, color: TYPE[c.type].col, sens: TYPE[c.type].sens, fam: c.fam, ph: [c.phopmn, c.phopmx], deep: c.roles.includes('deep') });
+  const pal = ['#c49a1c', '#2f7d4f', '#9ab83a', '#5b6fb0', '#d98a2b', '#8a5a33', '#7a6fb0', '#5fa8a0']; [...new Set(plans.flatMap(p => p.crops))].forEach((id, i) => CROPS[id].color = pal[i % pal.length]);
+  buildIncome(); baseOptions();
+}
+function buildIncome() {
+  $('incomeBox').innerHTML = R.map((r, i) => `<div class="ctl"><label for="inc${i}"><span>${r.id} · ${L2(r.name)}</span><output id="oInc${i}">${Math.round(r.income * 10)}</output></label><input id="inc${i}" type="range" min="0" max="10" value="${Math.round(r.income * 10)}"></div>`).join('');
+  R.forEach((_, i) => $('inc' + i).addEventListener('input', update));
+}
+function baseOptions() {
+  if (!CROPDB) return;
+  const cur = $('baseSel').value, g = S && S.guess;
+  $('baseSel').innerHTML = `<option value="">${t('เดาให้จากอากาศ', 'Guess from climate')}${g && g.auto ? ': ' + L2(CROPS[g.id] ? CROPS[g.id].name : { th: '', en: '' }) : ''}</option>` + CROPDB.map(c => `<option value="${c.id}"${c.id === cur ? ' selected' : ''}>${L2(c)}</option>`).join('');
+  const cm = $('baseMonth').value || 'auto';
+  $('baseMonth').innerHTML = `<option value="auto">${t('เดือนเริ่มปลูก: ช่วงที่เหมาะสุด', 'Sowing month: best window')}${g ? ' (' + MTH[LANG][g.start] + ')' : ''}</option>` + MTH[LANG].map((m, i) => `<option value="${i}"${String(i) === cm ? ' selected' : ''}>${t('เริ่มปลูก ', 'Sown in ')}${m}</option>`).join('');
+}
+function screenBlock(st) {
+  const el = $('screenBody'); if (!el) return null;
+  const res = screenCrops(st);
+  if (!res) { el.innerHTML = `<p class="note">${t('กำลังโหลดฐานข้อมูลพืช…', 'Loading the crop database…')}</p>`; return null; }
+  const ok = res.filter(r => r.pass), bad = res.filter(r => !r.pass);
+  const win = r => winTxt(r.start, r.nm, LANG);
+  const roles = c => c.roles.filter(x => ROLE[x]).map(x => `<span class="tag">${L2(ROLE[x])}</span>`).join('') || '—';
+  el.innerHTML = `<p style="margin:0 0 8px">${t(`<b>${ok.length} จาก ${res.length} ชนิด</b> ปลูกได้ที่จุดนี้ตามอุณหภูมิ ฝน และ pH ดิน`, `<b>${ok.length} of ${res.length} crops</b> fit this point on temperature, rainfall and soil pH`)}${st.irr ? t(' (มีชลประทาน: ไม่คิดข้อจำกัดฝนน้อย)', ' (irrigated: low rainfall not counted)') : ''}${st.rf || st.dT ? t(' · ใช้ scenario ที่ตั้งไว้', ' · under the chosen scenario') : ''}</p>
+    <div class="tbl"><table><thead><tr><th>${t('พืช', 'Crop')}</th><th>${t('เหมาะสม', 'Fit')}</th><th>${t('ช่วงปลูกที่ดีสุด', 'Best window')}</th><th>${t('บทบาทในรอบหมุนเวียน', 'Rotation role')}</th><th>${t('ข้อจำกัดหลัก', 'Main limit')}</th></tr></thead><tbody>
+    ${ok.map(r => `<tr><td>${L2(r.c)}</td><td>${Math.round(r.suit * 100)}%</td><td>${win(r)}</td><td>${roles(r.c)}</td><td>${r.why ? L2(r.why) : '—'}</td></tr>`).join('')}</tbody></table></div>
+    <details style="margin-top:8px"><summary>${t(`ไม่ผ่าน ${bad.length} ชนิด และเหตุผล`, `${bad.length} crops that do not fit, and why`)}</summary><div class="tbl"><table><tbody>
+    ${bad.map(r => `<tr><td>${L2(r.c)}</td><td>${Math.round(r.suit * 100)}%</td><td>${r.why ? L2(r.why) : ''}</td></tr>`).join('')}</tbody></table></div></details>
+    <p class="note" style="margin-top:8px">${t('ช่วงที่พืชทนได้มาจาก FAO ECOCROP (ช่วงกว้างระดับโลก ไม่แยกพันธุ์) เทียบกับอุณหภูมิและฝนรายเดือนจาก NASA POWER และ pH จาก SoilGrids · ผ่าน = เหมาะสม ≥ 50% · ไม่ได้บอกเรื่องตลาด โรค หรือพันธุ์ในพื้นที่ ต้องถามเจ้าหน้าที่เกษตร', 'Tolerance ranges are from FAO ECOCROP (broad, global, not variety-specific), compared with monthly temperature and rain from NASA POWER and pH from SoilGrids · pass = fit ≥ 50% · says nothing about markets, disease or local varieties; ask local advisers')}</p>`;
+  return res;
 }
 function ndviNote() {
   if (!S) return; const n = S.ndvi; let h;
@@ -627,7 +837,7 @@ function ndviNote() {
   else h = t('กำลังดึง NDVI 1 ปีล่าสุดของ pixel นี้จาก MODIS… ใช้เวลาประมาณ 1 นาที ส่วนอื่นใช้งานได้ระหว่างรอ', 'Fetching the last year of MODIS NDVI for this pixel… about 1 minute; the rest of the page works meanwhile.');
   $('ndviNote').innerHTML = h;
   $('cNdvi').closest('.chartbox').style.display = n ? '' : 'none';
-  $('baseNote').innerHTML = n ? t(`MODIS เห็นจุดนี้เป็น <b>${L2(RNAME[n.cls])}</b> เลือกแผนที่ใกล้กับที่ปลูกจริงที่สุด`, `MODIS sees this point as <b>${L2(RNAME[n.cls])}</b>. Pick the rotation closest to what is actually grown.`) : t('เลือกแผนที่ใกล้กับที่ปลูกจริงที่สุด ดาวเทียมบอกชื่อพืชไม่ได้', 'Pick the rotation closest to what is actually grown; satellites cannot name the crop.');
+  $('baseNote').innerHTML = (n ? t(`MODIS เห็นจุดนี้เป็น <b>${L2(RNAME[n.cls])}</b> · `, `MODIS sees this point as <b>${L2(RNAME[n.cls])}</b> · `) : '') + t('ดาวเทียมบอกชื่อพืชไม่ได้ เลือกพืชที่ปลูกจริงเพื่อให้แผนทางเลือกตรงกับแปลง ถ้าไม่เลือก ระบบจะเดาจากอากาศ', 'Satellites cannot name the crop. Pick what is actually grown so the alternatives match the field; otherwise the tool guesses from climate.');
 }
 /* T2 — last 90 days vs the same calendar window in 2001–2025 */
 async function loadRecent(site) {
@@ -690,7 +900,9 @@ async function loadRecent(site) {
 
 /* ---------- boot ---------- */
 ['sRain', 'sTemp'].forEach(id => $(id).addEventListener('input', update));
-['cIrr', 'cMach', 'baseSel'].forEach(id => $(id).addEventListener('change', update));
+fetch('data/crops.json').then(r => r.ok ? r.json() : Promise.reject()).then(d => { CROPDB = d; if (S) update(); }).catch(() => { const el = $('screenBody'); if (el) el.innerHTML = `<p class="note">${t('โหลดฐานข้อมูลพืชไม่ได้', 'Could not load the crop database')}</p>`; });
+{ const b = $('mobToggle'); if (b) { const lab = () => { const atMap = window.scrollY < $('summary').getBoundingClientRect().top + window.scrollY - 200; b.textContent = atMap ? t('ดูผล ↓', 'Results ↓') : t('แผนที่ ↑', 'Map ↑'); b.dataset.to = atMap ? 'res' : 'map'; }; b.onclick = () => (b.dataset.to === 'res' ? $('summary') : $('map')).scrollIntoView({ behavior: 'smooth', block: 'start' }); window.addEventListener('scroll', lab, { passive: true }); lab(); } }
+['cIrr', 'cMach', 'baseSel', 'baseMonth'].forEach(id => $(id).addEventListener('change', update));
 $('opac').addEventListener('input', paintCells);
 $('lTH').onclick = () => setLang('th'); $('lEN').onclick = () => setLang('en');
 function parseCoord(txt) {

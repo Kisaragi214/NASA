@@ -150,17 +150,28 @@ const sFactor = s => { const th = Math.atan(s / 100); return s < 9 ? 10.8 * Math
 let GRID = null, riskBreaks = [];
 const cellInfo = p => GRID.info[p];
 function demoGrid() {
-  const g = DEMO.grid, n = g.n, toLL = (x, y) => { const lat = y / g.R; return [lat * 180 / Math.PI, x / (g.R * Math.cos(lat)) * 180 / Math.PI]; };
-  const polys = [], info = [];
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    const x0 = g.xll + c * g.cell, x1 = x0 + g.cell, yT = g.yll + (n - r) * g.cell, yB = yT - g.cell;
-    polys.push([toLL(x0, yT), toLL(x1, yT), toLL(x1, yB), toLL(x0, yB)]);
-    const k = DEMO.kmeans.grid[r].charCodeAt(c) - 65, rule = DEMO.rules.grid[r].charCodeAt(c) - 65, slope = DEMO.slope[r][c];
-    const prof = DEMO.kmeans.profiles[k], nd = (prof[4] + prof[5] + prof[6] + prof[7] + prof[8]) / 5;
-    const C = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6));
-    info.push({ k, rule, slope, risk: sFactor(slope) * C, farm: FARM.has(k), base: CLASS_BASE[k] });
+  /* MODIS sinusoidal pixels form a sheared parallelogram on a web map. Resample (nearest pixel) onto an upright
+     lat/lon grid of the same 231 m spacing, keeping only the rectangle fully covered by data. */
+  const g = DEMO.grid, n = g.n, R = g.R;
+  const ll = (x, y) => { const lat = y / R; return [lat * 180 / Math.PI, x / (R * Math.cos(lat)) * 180 / Math.PI]; };
+  const rowLat = r => ll(0, g.yll + (n - r - 0.5) * g.cell)[0];
+  const colLon = (r, c) => ll(g.xll + (c + 0.5) * g.cell, g.yll + (n - r - 0.5) * g.cell)[1];
+  let lonMin = -Infinity, lonMax = Infinity;
+  for (let r = 0; r < n; r++) { lonMin = Math.max(lonMin, colLon(r, 0)); lonMax = Math.min(lonMax, colLon(r, n - 1)); }
+  const lat0 = rowLat((n - 1) / 2), dLon = g.cell / (111320 * Math.cos(lat0 * Math.PI / 180)), hLat = (rowLat(0) - rowLat(1)) / 2;
+  const cols = Math.floor((lonMax - lonMin) / dLon) + 1, polys = [], info = [];
+  for (let r = 0; r < n; r++) {
+    const la = rowLat(r), c0 = colLon(r, 0), dl = colLon(r, 1) - c0;
+    for (let j = 0; j < cols; j++) {
+      const lo = lonMin + j * dLon, c = Math.max(0, Math.min(n - 1, Math.round((lo - c0) / dl)));
+      polys.push([[la + hLat, lo - dLon / 2], [la + hLat, lo + dLon / 2], [la - hLat, lo + dLon / 2], [la - hLat, lo - dLon / 2]]);
+      const k = DEMO.kmeans.grid[r].charCodeAt(c) - 65, rule = DEMO.rules.grid[r].charCodeAt(c) - 65, slope = DEMO.slope[r][c];
+      const prof = DEMO.kmeans.profiles[k], nd = (prof[4] + prof[5] + prof[6] + prof[7] + prof[8]) / 5;
+      const C = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6));
+      info.push({ k, rule, slope, risk: sFactor(slope) * C, farm: FARM.has(k), base: CLASS_BASE[k] });
+    }
   }
-  return { kind: 'demo', n, cell: Math.round(g.cell), polys, info };
+  return { kind: 'demo', n, cols, cell: Math.round(g.cell), polys, info };
 }
 /* Live grid: n×n square cells of `cell` metres centred on the point; slope from the DEM sampler */
 function liveGrid(site, n = 41, cell = 60) {
@@ -377,7 +388,7 @@ function paintCells() {
 }
 function legend(rec) {
   const n = GRID.info.length; const count = f => { let c = 0; for (let p = 0; p < n; p++) if (f(p)) c++; return Math.round(c / n * 100) + '%'; };
-  const gridNote = GRID.kind === 'live' ? t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`) : t('กริด MODIS 33×33 ช่องละ 231 m (พื้นที่ตัวอย่าง)', 'MODIS grid 33×33, 231 m cells (example area)');
+  const gridNote = GRID.kind === 'live' ? t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`) : t(`กริด MODIS ${GRID.n}×${GRID.cols} ช่องละ 231 m จัดให้ตรงแนวเหนือ–ใต้ (พื้นที่ตัวอย่าง)`, `MODIS grid ${GRID.n}×${GRID.cols}, 231 m cells, resampled north-up (example area)`);
   let h = '';
   if (mapMode === 'kmeans') h = KNAME.map((nm, i) => `<span><i style="background:${KCOL[i]}"></i>${L2(nm)}<b>${count(p => cellInfo(p).k === i)}</b></span>`).join('');
   else if (mapMode === 'rules') h = RNAME.map((nm, i) => `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${count(p => cellInfo(p).rule === i)}</b></span>`).join('');

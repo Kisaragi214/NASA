@@ -35,10 +35,11 @@ let CUSTOM = [], HIDE = new Set(), scrOpen = false, scrType = 'all';
 const KC_OVERRIDE = { cassava: .8, rice_paddy: 1.2, sugarcane: 1.25 };
 const PLAN_COL = ['#a7a39a','#2f7d4f','#9ab83a','#5b6fb0','#d98a2b','#8a5a33','#7a6fb0','#c4512b','#3fa7a0','#b98a12','#666'];
 const RNAME = [
-  {th:'ป่า / ไม้ยืนต้น',en:'Forest / trees'},{th:'โล่ง / ชุมชน / น้ำ',en:'Bare / built / water'},
-  {th:'พืชสองฤดู',en:'Two-season crop'},{th:'พืชฤดูเดียว (สั้น)',en:'Single short season'},{th:'พืชไร่อายุยาว',en:'Long-season crop'}
+  {th:'ป่า / ไม้ยืนต้นเขียวทั้งปี',en:'Evergreen forest / trees'},{th:'โล่ง / ชุมชน / น้ำ',en:'Bare / built / water'},
+  {th:'พืชสองฤดู',en:'Two-season crop'},{th:'พืชฤดูเดียว (สั้น)',en:'Single short season'},{th:'พืชไร่อายุยาว',en:'Long-season crop'},
+  {th:'หญ้า / พุ่มไม้บาง',en:'Sparse grass / shrub'},{th:'สวน / ไม้ผลัดใบ',en:'Orchard / deciduous trees'},{th:'พืชสามฤดูขึ้นไป (มีน้ำทั้งปี)',en:'Three or more seasons (water all year)'}
 ];
-const RCOL = ['#1f5e3a','#a7a39a','#2a6f9e','#c49a1c','#8a5a33'];
+const RCOL = ['#1f5e3a','#a7a39a','#2a6f9e','#c49a1c','#8a5a33','#c8cf86','#5fa36b','#7a4fa0'];
 const RISK_COL = ['#2f7d4f','#9ab83a','#e2c044','#e08a3c','#c4512b'];
 const PRIO = [
   { id:'wWater', v:3, l:{th:'ประหยัดน้ำ',en:'Save water'} },
@@ -128,7 +129,9 @@ function liveGrid(site, n = 133, cell = 30) {
     let cover = null, px = -1;
     if (A) { const m = modisPix(A, la, lo); if (m.inside) { px = m.p; const nd = A.lowNd[px]; if (nd != null) cover = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6)); } }
     const sf = isNaN(slope) ? 0 : sFactor(slope);
-    info.push({ slope, cover, px, risk: cover == null ? sf : sf * (0.15 + 0.85 * cover), farm: !isNaN(slope) });
+    let fr = -1, fk = null;
+    if (A && px >= 0 && A.prof) { const sr = resampleProf(A, la, lo); if (sr) { fr = classifyNdvi(sr); if (A.k) { let bd = 1e9; A.cents.forEach((c, i) => { let d = 0; for (let q = 0; q < sr.length; q++) { const e = sr[q] - c.prof[q]; d += e * e; } if (d < bd) { bd = d; fk = i; } }); } } else { fr = A.rule[px]; fk = A.km[px]; } }
+    info.push({ slope, cover, px, fr, fk, risk: cover == null ? sf : sf * (0.15 + 0.85 * cover), farm: !isNaN(slope) });
   }
   const bounds = [[site.lat - (h + .5) * dLat, site.lon - (h + .5) * dLon], [site.lat + (h + .5) * dLat, site.lon + (h + .5) * dLon]];
   return { n, cell, info, bounds, dLat, dLon, lat0: site.lat + (h + .5) * dLat, lon0: site.lon - (h + .5) * dLon, hasCover: !!A };
@@ -140,6 +143,19 @@ function gridCell(lat, lon) {
 }
 /* MODIS sinusoidal grid helpers (ORNL subsets give xllcorner / yllcorner / cellsize in metres) */
 const R_SIN = 6371007.181;
+/* NDVI profile at any point: bilinear mix of the four nearest 250 m pixels. This smooths the picture between pixel
+   centres so the layer lines up with the 30 m grid; it adds no real detail below 250 m. */
+function resampleProf(A, lat, lon) {
+  let fc, fr; const l = lat * Math.PI / 180;
+  if (A.merc) { const n = 256 * 2 ** A.merc.z; fc = (lon + 180) / 360 * n - A.merc.x0 - .5; fr = (1 - Math.log(Math.tan(l) + 1 / Math.cos(l)) / Math.PI) / 2 * n - A.merc.y0 - .5; }
+  else { fc = (R_SIN * lon * Math.PI / 180 * Math.cos(l) - A.xll) / A.cell - .5; fr = A.nrows - (R_SIN * l - A.yll) / A.cell - .5; }
+  const c0 = Math.floor(fc), r0 = Math.floor(fr), tx = fc - c0, ty = fr - r0; let out = null, wsum = 0;
+  for (const [dr, dc, w] of [[0, 0, (1 - tx) * (1 - ty)], [0, 1, tx * (1 - ty)], [1, 0, (1 - tx) * ty], [1, 1, tx * ty]]) {
+    const r = Math.max(0, Math.min(A.nrows - 1, r0 + dr)), c = Math.max(0, Math.min(A.ncols - 1, c0 + dc)), pr = A.prof[r * A.ncols + c]; if (!pr || w <= 0) continue;
+    if (!out) out = new Array(pr.length).fill(0); for (let i = 0; i < pr.length; i++) out[i] += pr[i] * w; wsum += w;
+  }
+  if (!out || wsum < 0.25) return null; for (let i = 0; i < out.length; i++) out[i] /= wsum; return out;
+}
 function modisPix(A, lat, lon) {
   if (A.merc) { /* GIBS web-mercator tile pixels */
     const n = 256 * 2 ** A.merc.z, l = lat * Math.PI / 180, c = Math.floor((lon + 180) / 360 * n) - A.merc.x0, r = Math.floor((1 - Math.log(Math.tan(l) + 1 / Math.cos(l)) / Math.PI) / 2 * n) - A.merc.y0;
@@ -179,15 +195,33 @@ function kmeans(X, k, restarts = 8) {
   }
   return best;
 }
-const KM_COL = ['#1f5e3a', '#6f9a5a', '#c8cf86', '#e2c044', '#c4763a', '#a7a39a'];
-const kmName = (A, i) => { const c = A.cents[i]; return t(`กลุ่ม ${i + 1}: NDVI เฉลี่ย ${c.mean.toFixed(2)} · ${c.amp < 0.15 ? 'เขียวคงที่ทั้งปี' : 'ขึ้นลงตามฤดู ต่ำสุด ' + MTH.th[c.lowM]}`, `Group ${i + 1}: mean NDVI ${c.mean.toFixed(2)} · ${c.amp < 0.15 ? 'steady all year' : 'seasonal, lowest in ' + MTH.en[c.lowM]}`); };
+const KM_COL = ['#1f5e3a', '#4f8f5a', '#8fbf6a', '#c8cf86', '#e2c044', '#d98a2b', '#b5603a', '#a7a39a'];
+const kmName = (A, i) => { const c = A.cents[i], st = ndviStats(c.prof); return t(`กลุ่ม ${i + 1}: NDVI ${st.mn.toFixed(2)}–${st.mx.toFixed(2)} · ${c.amp < 0.15 ? 'เขียวคงที่ทั้งปี' : st.pk + ' พีค ต่ำสุด ' + MTH.th[c.lowM]} · คล้าย “${RNAME[c.rule].th}”`, `Group ${i + 1}: NDVI ${st.mn.toFixed(2)}–${st.mx.toFixed(2)} · ${c.amp < 0.15 ? 'steady all year' : st.pk + (st.pk === 1 ? ' peak' : ' peaks') + ', lowest in ' + MTH.en[c.lowM]} · like “${RNAME[c.rule].en}”`); };
 
 /* ---------- UI build ---------- */
+/* Priorities: the 0–5 sliders are only relative. What the score uses is each one's share of the total, shown as % */
+const PRESET = [
+  { l: { th: 'สมดุล', en: 'Balanced' }, v: [3, 4, 2, 2, 2] },
+  { l: { th: 'น้ำน้อย', en: 'Little water' }, v: [5, 2, 1, 2, 1] },
+  { l: { th: 'ฟื้นฟูดิน', en: 'Restore soil' }, v: [2, 5, 2, 1, 1] },
+  { l: { th: 'อากาศร้อนแล้ง', en: 'Hot, dry climate' }, v: [4, 2, 1, 5, 1] },
+  { l: { th: 'เน้นรายได้', en: 'Income first' }, v: [2, 2, 1, 1, 5] }
+];
+const PRIO_COL = ['#2a6f9e', '#8a5a33', '#7a6fb0', '#c4512b', '#b98a12'];
+const PRIO_WORD = [{ th: 'ไม่นับ', en: 'ignored' }, { th: 'น้อย', en: 'low' }, { th: 'ค่อนข้างน้อย', en: 'fairly low' }, { th: 'ปานกลาง', en: 'medium' }, { th: 'มาก', en: 'high' }, { th: 'มากที่สุด', en: 'highest' }];
+function prioShow(st) {
+  const tot = PRIO.reduce((a, p) => a + st.w[p.id], 0), sh = PRIO.map(p => tot ? st.w[p.id] / tot * 100 : 0);
+  PRIO.forEach((p, i) => { const o = $('o' + p.id); if (o) o.innerHTML = `${L2(PRIO_WORD[st.w[p.id]])} · <b>${Math.round(sh[i])}%</b>`; });
+  const bar = $('prioBar'); if (bar) bar.innerHTML = tot ? PRIO.map((p, i) => sh[i] ? `<i style="width:${sh[i]}%;background:${PRIO_COL[i]}" title="${L2(p.l)} ${Math.round(sh[i])}%"></i>` : '').join('') : '';
+  document.querySelectorAll('[data-pre]').forEach(b => b.setAttribute('aria-pressed', PRESET[+b.dataset.pre].v.every((v, i) => v === st.w[PRIO[i].id])));
+  const n = $('prioNote'); if (n) n.textContent = tot ? t('% = สัดส่วนที่ใช้คิดคะแนนรวมจริง (รวมกัน 100%) · เลือกแบบสำเร็จด้านบน หรือเลื่อนเอง', '% = the share actually used in the overall score (adds to 100%) · pick a preset above or move the sliders') : t('ทุกข้อเป็น "ไม่นับ" คะแนนรวมจะเป็น 0', 'Everything is "ignored", so the overall score is 0');
+}
 function buildControls() {
-  $('prioBox').innerHTML = PRIO.map(p => `<div class="ctl"><label for="${p.id}"><span>${L2(p.l)}</span><output id="o${p.id}">${$(p.id) ? $(p.id).value : p.v}</output></label><input id="${p.id}" type="range" min="0" max="5" value="${$(p.id) ? $(p.id).value : p.v}">${p.h ? `<p class="note">${L2(p.h)}</p>` : ''}</div>`).join('');
+  $('prioBox').innerHTML = `<div class="row" id="prioPre">${PRESET.map((q, i) => `<button type="button" class="btn" data-pre="${i}">${L2(q.l)}</button>`).join('')}</div><div id="prioBar" class="pbar" role="img" aria-label="weights"></div>` + PRIO.map(p => `<div class="ctl"><label for="${p.id}"><span>${L2(p.l)}</span><output id="o${p.id}"></output></label><input id="${p.id}" type="range" min="0" max="5" value="${$(p.id) ? $(p.id).value : p.v}" style="accent-color:${PRIO_COL[PRIO.indexOf(p)]}">${p.h ? `<p class="note">${L2(p.h)}</p>` : ''}</div>`).join('') + '<p class="note" id="prioNote"></p>';
   if (R.length) { const keep = R.map((_, i) => $('inc' + i) ? $('inc' + i).value : null); buildIncome(); keep.forEach((v, i) => { if (v != null && $('inc' + i)) $('inc' + i).value = v; }); }
   baseOptions();
   PRIO.forEach(p => $(p.id).addEventListener('input', update));
+  document.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => { PRESET[+b.dataset.pre].v.forEach((v, i) => $(PRIO[i].id).value = v); update(); });
   const bb = [['esri', {th:'ภาพละเอียดสูง',en:'High-res imagery'}], ['osm', {th:'แผนที่ถนน',en:'Street map'}], ['blank', {th:'ไม่มี',en:'None'}]];
   $('baseBtns').innerHTML = bb.map(([k, l]) => `<button type="button" class="btn" data-base="${k}" aria-pressed="${k === curBase}">${L2(l)}</button>`).join('');
   const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended plan'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['slope', {th:'ความลาดชัน',en:'Slope'}], ['km', {th:'รูปแบบพืชพรรณ (k-means)',en:'Vegetation pattern (k-means)'}], ['rules', {th:'รูปแบบ (กฎ)',en:'Pattern (rules)'}], ['none', {th:'ไม่แสดง',en:'None'}]];
@@ -213,7 +247,7 @@ function renderAll() { update(); drawCharts(); trends(); soilTiles(); paintCells
 function update() {
   if (!S) return;
   const st = readState();
-  PRIO.forEach(p => $('o' + p.id).textContent = st.w[p.id]);
+  prioShow(st);
   R.forEach((r, i) => { const o = $('oInc' + i); if (o) o.textContent = Math.round(incomeOf(i) * 10); });
   $('oRain').textContent = (st.rf > 0 ? '+' : '') + Math.round(st.rf * 100) + '%';
   $('oTemp').textContent = '+' + st.dT.toFixed(1) + ' °C';
@@ -398,8 +432,8 @@ function paintCells() {
     if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
     else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
     else if (mapMode === 'rec') col = rec && rec[p] >= 0 ? PLAN_COL[rec[p]] : null;
-    else if (mapMode === 'km') col = A && ci.px >= 0 && A.km[ci.px] != null ? KM_COL[A.km[ci.px]] : null;
-    else if (mapMode === 'rules') col = A && ci.px >= 0 && A.rule[ci.px] >= 0 ? RCOL[A.rule[ci.px]] : null;
+    else if (mapMode === 'km') col = A && ci.fk != null ? KM_COL[ci.fk] : null;
+    else if (mapMode === 'rules') col = A && ci.fr >= 0 ? RCOL[ci.fr] : null;
     if (!col) return;
     const c = cache[col] || (cache[col] = hexRGB(col)), k = p * 4;
     img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2]; img.data[k + 3] = 255;
@@ -418,10 +452,10 @@ function legend(rec) {
     const A = S.ndvi && S.ndvi.area;
     if (!A) h = `<p class="note">${S.ndviFailed ? t('ดึง NDVI จาก MODIS ไม่ได้ ชั้นนี้จึงไม่มีข้อมูล', 'MODIS NDVI could not be fetched, so this layer is empty') : t('กำลังดึง NDVI จาก MODIS… (~1 นาที)', 'Fetching MODIS NDVI… (~1 min)')}</p>`;
     else {
-      const N = A.rule.length, share = f => Math.round(A.rule.filter((_, p) => f(p)).length / N * 100) + '%';
-      if (mapMode === 'km') h = A.k ? A.cents.map((_, i) => `<span><i style="background:${KM_COL[i]}"></i>${kmName(A, i)}<b>${share(p => A.km[p] === i)}</b></span>`).join('') : `<p class="note">${t('pixel ที่ใช้ได้น้อยเกินไปสำหรับ k-means', 'Too few usable pixels for k-means')}</p>`;
-      else h = RNAME.map((nm, i) => `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${share(p => A.rule[p] === i)}</b></span>`).join('');
-      h += `<p class="note">${t(`ข้อมูลจริงละเอียด 250 m (MODIS ${A.nrows}×${A.ncols} pixel, NDVI 1 ปีล่าสุด) วางลงกริด 30 m ให้ตรงกับชั้นอื่น ไม่ได้ละเอียดขึ้นจริง`, `True resolution is 250 m (MODIS ${A.nrows}×${A.ncols} pixels, last year of NDVI), placed on the 30 m grid to line up with the other layers; it is not actually finer`)}</p>`;
+      const cl = GRID.info.filter(ci => ci.fr >= 0), share = f => Math.round(cl.filter(f).length / (cl.length || 1) * 100) + '%';
+      if (mapMode === 'km') h = A.k ? A.cents.map((_, i) => `<span><i style="background:${KM_COL[i]}"></i>${kmName(A, i)}<b>${share(ci => ci.fk === i)}</b></span>`).join('') : `<p class="note">${t('pixel ที่ใช้ได้น้อยเกินไปสำหรับ k-means', 'Too few usable pixels for k-means')}</p>`;
+      else h = RNAME.map((nm, i) => cl.some(ci => ci.fr === i) ? `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${share(ci => ci.fr === i)}</b></span>` : '').join('');
+      h += `<p class="note">${t(`ข้อมูลจริงละเอียด 250 m (MODIS ${A.nrows}×${A.ncols} pixel, NDVI 1 ปีล่าสุด) · แต่ละช่อง 30 m ใช้กราฟ NDVI ที่เฉลี่ยตามระยะจาก 4 pixel ที่ใกล้สุด (bilinear) แล้วจำแนกใหม่ ขอบเขตจึงเรียบขึ้น แต่ไม่ได้เห็นรายละเอียดเล็กกว่า 250 m จริง`, `True resolution is 250 m (MODIS ${A.nrows}×${A.ncols} pixels, last year of NDVI) · each 30 m cell uses an NDVI curve blended by distance from the 4 nearest pixels (bilinear) and is classified again, so edges are smoother, but nothing smaller than 250 m is really resolved`)}</p>`;
     }
     $('legend').innerHTML = h; return;
   }
@@ -437,7 +471,7 @@ function cellHTML(p) {
   let h = `${t('ความลาดชัน', 'Slope')}: ${isNaN(ci.slope) ? '—' : ci.slope + '%'}`;
   if (ci.farm) h += `<br>${t('เสี่ยงดินพัง', 'Erosion risk')}: ${lvl}`;
   if (ci.cover != null) h += `<br>${t('พืชคลุมดินช่วงต่ำสุด', 'Low-season cover')}: ${Math.round((1 - ci.cover) * 100)}%`;
-  if (A && ci.px >= 0 && A.rule[ci.px] >= 0) h += `<br>${t('รูปแบบ (กฎ)', 'Pattern (rules)')}: ${L2(RNAME[A.rule[ci.px]])}` + (A.km[ci.px] != null ? `<br>k-means: ${kmName(A, A.km[ci.px])}` : '');
+  if (A && ci.fr >= 0) h += `<br>${t('รูปแบบ (กฎ)', 'Pattern (rules)')}: ${L2(RNAME[ci.fr])}` + (ci.fk != null ? `<br>k-means: ${kmName(A, ci.fk)}` : '');
   if (ci.farm && R.length) { const rec = recFor(st)[p]; if (rec >= 0) h += `<br><b>${t('แนะนำ', 'Suggested')}: ${R[rec].id} · ${L2(R[rec].name)}</b>`; }
   return h;
 }
@@ -647,17 +681,27 @@ function applySite(site) {
   renderAll();
 }
 /* MODIS NDVI at the clicked pixel for the last year (ORNL DAAC web service; slow: ~30–60 s). Cloud-screened with pixel_reliability. */
-function modisDates() {
+function modisDates(off = 0) {
   const out = [], end = Date.now() - 12 * 864e5, start = end - 372 * 864e5;
-  for (let y = new Date(start).getUTCFullYear(); y <= new Date(end).getUTCFullYear(); y++) for (let doy = 1; doy <= 353; doy += 16) {
+  for (let y = new Date(start).getUTCFullYear(); y <= new Date(end).getUTCFullYear(); y++) for (let doy = 1 + off; doy <= 353 + off && doy <= 365; doy += 16) {
     const ms = Date.UTC(y, 0, doy); if (ms >= start && ms <= end) out.push({ a: `A${y}${String(doy).padStart(3, '0')}`, iso: isoDay(ms) });
   }
   return out;
 }
+/* Phenology rules on one year of NDVI. f scales the windows when the series is 8-day (Terra + Aqua) instead of 16-day. */
+function ndviStats(a) {
+  const K = a.length, f = Math.max(1, Math.round(K / 23)), mn = Math.min(...a), mx = Math.max(...a), amp = mx - mn, len = a.filter(v => v >= mn + 0.5 * amp).length / f; let pk = 0;
+  const rng = n => Array.from({ length: n }, (_, j) => j + 1);
+  for (let i = 0; i < K; i++) { if (rng(3 * f).every(j => a[i] > a[(i - j + K) % K] && a[i] >= a[(i + j) % K])) { const lo = Math.min(...rng(6 * f).map(j => Math.min(a[(i - j + K) % K], a[(i + j) % K]))); if (a[i] - lo > 0.1) pk++; } }
+  return { mn, mx, amp, len, pk };
+}
 function classifyNdvi(a) {
-  const K = a.length, mn = Math.min(...a), mx = Math.max(...a), amp = mx - mn, len = a.filter(v => v >= mn + 0.5 * amp).length; let pk = 0;
-  for (let i = 0; i < K; i++) { if ([1, 2, 3].every(j => a[i] >= a[(i - j + K) % K] && a[i] >= a[(i + j) % K])) { const lo = Math.min(...[1, 2, 3, 4, 5, 6].map(j => Math.min(a[(i - j + K) % K], a[(i + j) % K]))); if (a[i] - lo > 0.1) pk++; } }
-  if (mn >= 0.55) return 0; if (mx < 0.35) return 1; if (pk >= 2) return 2; if (len <= 9) return 3; return 4;
+  const { mn, mx, amp, len, pk } = ndviStats(a);
+  if (mx < 0.35) return 1;                      /* never green */
+  if (mn >= 0.55) return 0;                     /* always dense green */
+  if (amp < 0.2 && mx < 0.5) return 5;          /* low and steady */
+  if (amp < 0.25 && mn >= 0.4) return 6;        /* fairly green, small seasonal swing */
+  if (pk >= 3) return 7; if (pk >= 2) return 2; if (len <= 9) return 3; return 4;
 }
 /* NASA GIBS: NDVI decoded from the MODIS_Terra_L3_NDVI_16Day image tiles with the layer's own colour map.
    Takes seconds instead of a minute and does not depend on the ORNL service; no per-pixel quality flags. */
@@ -674,7 +718,7 @@ async function gibsColormap() {
   return gibsCM = { ex, list };
 }
 function loadImg(u, ms = 20000) { return new Promise((res, rej) => { const im = new Image(); im.crossOrigin = 'anonymous'; const to = setTimeout(() => rej(new Error('timeout')), ms); im.onload = () => { clearTimeout(to); res(im); }; im.onerror = () => { clearTimeout(to); rej(new Error('tile')); }; im.src = u; }); }
-async function gibsNdvi(site, ds) {
+async function gibsNdvi(site, ds, layer = 'MODIS_Terra_L3_NDVI_16Day') {
   if (Math.abs(site.lat) > 80) throw new Error('latitude');
   const cm = await gibsColormap(), z = 9, n = 256 * 2 ** z, la = site.lat * Math.PI / 180;
   const gx = (site.lon + 180) / 360 * n, gy = (1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * n;
@@ -689,7 +733,7 @@ async function gibsNdvi(site, ds) {
   const one = async d => {
     try {
       const cv = document.createElement('canvas'); cv.width = cv.height = w; const cx = cv.getContext('2d', { willReadFrequently: true });
-      const ims = await Promise.all(tiles.map(([tx, ty]) => loadImg(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_L3_NDVI_16Day/default/${d.iso}/GoogleMapsCompatible_Level9/${z}/${ty}/${tx}.png`)));
+      const ims = await Promise.all(tiles.map(([tx, ty]) => loadImg(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${layer}/default/${d.iso}/GoogleMapsCompatible_Level9/${z}/${ty}/${tx}.png`)));
       ims.forEach((im, i) => cx.drawImage(im, tiles[i][0] * 256 - x0, tiles[i][1] * 256 - y0));
       const px = cx.getImageData(0, 0, w, w).data, data = []; let ok = 0;
       for (let i = 0; i < w * w; i++) { const v = dec(px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3]); if (v != null) ok++; data.push(v == null ? -3000 : Math.round(v * 1e4)); }
@@ -706,8 +750,9 @@ async function loadNdvi(site) {
   try {
     const ds = modisDates(); let nrows, ncols, nd, rel = null, geo;
     /* 1) NASA GIBS tiles: fast. 2) ORNL DAAC subset (true 250 m values + quality band) if GIBS gives too little. */
-    const g = await gibsNdvi(site, ds).catch(e => { console.warn('NDVI via GIBS', e); return null; });
-    if (g && g.nd.length >= 12) ({ nrows, ncols, nd, geo } = g);
+    /* Terra and Aqua composites are offset by 8 days: together they give an 8-day series (finer in time, same 250 m pixels) */
+    const [g, ga] = await Promise.all([gibsNdvi(site, ds).catch(e => { console.warn('NDVI via GIBS', e); return null; }), gibsNdvi(site, modisDates(8), 'MODIS_Aqua_L3_NDVI_16Day').catch(() => null)]);
+    if (g && g.nd.length >= 12) { ({ nrows, ncols, nd, geo } = g); if (ga && ga.nd.length >= 12 && ga.nrows === nrows) { nd = nd.concat(ga.nd); geo.aqua = true; } }
     else {
       if (site === S) setStatus('ndvi', 'load', () => t('~1 นาที (ORNL)', '~1 min (ORNL)'));
       const chunks = []; for (let i = 0; i < ds.length; i += 10) chunks.push(ds.slice(i, i + 10));
@@ -721,7 +766,7 @@ async function loadNdvi(site) {
       nd = ndJ.flatMap(x => x.subset || []);
       rel = rlJ ? new Map(rlJ.flatMap(x => x.subset || []).map(x => [x.modis_date, x.data])) : null;
     }
-    const N = nrows * ncols; nd.sort((a, b) => a.modis_date < b.modis_date ? -1 : 1);
+    const N = nrows * ncols; nd.sort((a, b) => a.calendar_date < b.calendar_date ? -1 : 1);
     if (nd.length < 8) throw new Error(t('ได้ภาพ NDVI น้อยเกินไป', 'too few NDVI composites returned'));
     const dates = nd.map(x => x.calendar_date);
     const series = p => {
@@ -737,7 +782,8 @@ async function loadNdvi(site) {
       const x = raw.slice(); let last = -1;
       for (let i = 0; i < x.length; i++) if (x[i] != null) { if (last < 0) for (let k = 0; k < i; k++) x[k] = x[i]; else for (let k = last + 1; k < i; k++) x[k] = x[last] + (x[i] - x[last]) * (k - last) / (i - last); last = i; }
       for (let k = last + 1; k < x.length; k++) x[k] = x[last];
-      return { raw, clear, loose, smooth: x.map((v, i) => i === 0 || i === x.length - 1 ? v : 0.25 * x[i - 1] + 0.5 * v + 0.25 * x[i + 1]) };
+      let sm = x; for (let pass = 0; pass < (geo.aqua ? 2 : 1); pass++) sm = sm.map((v, i) => i === 0 || i === sm.length - 1 ? v : 0.25 * sm[i - 1] + 0.5 * v + 0.25 * sm[i + 1]);
+      return { raw, clear, loose, smooth: sm };
     };
     const px = Array.from({ length: N }, (_, p) => series(p));
     const cen = px[Math.floor(nrows / 2) * ncols + Math.floor(ncols / 2)];
@@ -748,14 +794,15 @@ async function loadNdvi(site) {
     const lowM = order[0][1], lowMonths = [lowM, (lowM + 1) % 12].filter(m => !isNaN(mMean[m]) && mMean[m] <= order[0][0] + 0.08);
     /* Two classifications of every pixel: fixed phenology rules, and k-means on the NDVI profiles */
     const rule = px.map(q => q.smooth ? classifyNdvi(q.smooth) : -1), valid = px.map((q, p) => q.smooth ? p : -1).filter(p => p >= 0);
-    const area = { nrows, ncols, ...geo, rule, loose: px.filter(q => q.loose).length, km: new Array(N).fill(null), lowNd: px.map(q => q.smooth ? lowOf(q.smooth) : null), k: 0, cents: [], agree: null, valid: valid.length, noQA: !rel };
-    const k = Math.min(5, Math.floor(valid.length / 8));
+    const area = { nrows, ncols, ...geo, prof: px.map(q => q.smooth), rule, loose: px.filter(q => q.loose).length, km: new Array(N).fill(null), lowNd: px.map(q => q.smooth ? lowOf(q.smooth) : null), k: 0, cents: [], agree: null, valid: valid.length, noQA: !rel };
+    /* k from the data: try 2..8 and stop when one more group no longer cuts the within-group spread by 8 % of the k=2 spread */
+    const kMax = Math.min(8, Math.floor(valid.length / 8)), X = valid.map(p => px[p].smooth); let k = 0, res = null;
+    if (kMax >= 2) { const runs = []; for (let q = 2; q <= kMax; q++) runs[q] = kmeans(X, q, 4); k = kMax; for (let q = 3; q < kMax; q++) if ((runs[q].sse - runs[q + 1].sse) < 0.08 * runs[2].sse) { k = q; break; } if (kMax < 3) k = kMax; res = runs[k]; area.kTried = kMax; }
     if (k >= 2) {
-      const res = kmeans(valid.map(p => px[p].smooth), k);
       const ord = res.C.map((c, i) => [c.reduce((a, b) => a + b, 0) / c.length, i]).sort((a, b) => b[0] - a[0]).map(x => x[1]), pos = []; ord.forEach((o, i) => pos[o] = i);
       valid.forEach((p, i) => area.km[p] = pos[res.lab[i]]);
       area.cents = ord.map(o => { const c = res.C[o], mm = monthMean(c), lo = mm.map((v, m) => [v, m]).filter(q => !isNaN(q[0])).sort((a, b) => a[0] - b[0])[0][1]; return { prof: c.map(v => +v.toFixed(3)), mean: c.reduce((a, b) => a + b, 0) / c.length, amp: Math.max(...c) - Math.min(...c), lowM: lo, rule: classifyNdvi(c) }; });
-      let agreeN = 0; for (let c = 0; c < k; c++) { const cnt = new Array(5).fill(0); valid.forEach(p => { if (area.km[p] === c) cnt[rule[p]]++; }); agreeN += Math.max(...cnt); }
+      let agreeN = 0; for (let c = 0; c < k; c++) { const cnt = new Array(RNAME.length).fill(0); valid.forEach(p => { if (area.km[p] === c) cnt[rule[p]]++; }); agreeN += Math.max(...cnt); }
       area.k = k; area.agree = agreeN / valid.length; area.sse = res.sse;
     }
     site.ndvi = { dates, raw: cen.raw, smooth: cen.smooth.map(v => +v.toFixed(3)), cls: classifyNdvi(cen.smooth), min: Math.min(...cen.smooth), max: Math.max(...cen.smooth), clear: cen.clear, total: dates.length,
@@ -972,7 +1019,7 @@ function compareTable(st, ev, soil, scores, scrBy) {
 }
 function ndviNote() {
   if (!S) return; const n = S.ndvi; let h;
-  if (n) h = `<b>${L2(RNAME[n.cls])}</b> · NDVI ${n.min.toFixed(2)}–${n.max.toFixed(2)} · ${n.bareMonths.length ? t('ดินโล่ง (NDVI < 0.3): ', 'bare soil (NDVI < 0.3): ') + n.bareMonths.map(m => MTH[LANG][m]).join(', ') : t('ไม่มีเดือนที่ NDVI ต่ำกว่า 0.3 · พืชคลุมดินน้อยสุด: ', 'no month below NDVI 0.3 · lowest cover: ') + n.lowMonths.map(m => MTH[LANG][m]).join('–')}<br>${n.area.src === 'gibs' ? t('MODIS Terra NDVI 16 วัน 250 m อ่านจากภาพ NASA GIBS (ค่าจากแถบสี ±0.01 ไม่มีแถบคุณภาพ ตัดค่าที่ตกผิดปกติออก)', 'MODIS Terra 16-day NDVI 250 m read from NASA GIBS imagery (values from the colour scale, ±0.01; no quality band, sudden dips removed)') : 'MODIS MOD13Q1 250 m (ORNL DAAC)'} · ${t(`ภาพที่ใช้ได้ ${n.clear}/${n.total}`, `${n.clear}/${n.total} usable composites`)} · ${t('pixel 250 m อาจรวมแปลงข้างเคียง การจำแนกเป็นกฎอย่างง่าย ควรเทียบกับภาพจริง', 'a 250 m pixel may mix neighbouring fields; the class is a simple rule, check it against imagery')}`;
+  if (n) h = `<b>${L2(RNAME[n.cls])}</b> · NDVI ${n.min.toFixed(2)}–${n.max.toFixed(2)} · ${n.bareMonths.length ? t('ดินโล่ง (NDVI < 0.3): ', 'bare soil (NDVI < 0.3): ') + n.bareMonths.map(m => MTH[LANG][m]).join(', ') : t('ไม่มีเดือนที่ NDVI ต่ำกว่า 0.3 · พืชคลุมดินน้อยสุด: ', 'no month below NDVI 0.3 · lowest cover: ') + n.lowMonths.map(m => MTH[LANG][m]).join('–')}<br>${n.area.src === 'gibs' ? (n.area.aqua ? t('MODIS Terra + Aqua 250 m ทุก 8 วัน', 'MODIS Terra + Aqua 250 m, every 8 days') : t('MODIS Terra 250 m ทุก 16 วัน', 'MODIS Terra 250 m, every 16 days')) + t(' อ่านจากภาพ NASA GIBS (ค่าจากแถบสี ±0.01 ไม่มีแถบคุณภาพ ตัดค่าที่ตกผิดปกติออก)', ', read from NASA GIBS imagery (values from the colour scale, ±0.01; no quality band, sudden dips removed)') : 'MODIS MOD13Q1 250 m (ORNL DAAC)'} · ${t(`ภาพที่ใช้ได้ ${n.clear}/${n.total}`, `${n.clear}/${n.total} usable composites`)} · ${t('pixel 250 m อาจรวมแปลงข้างเคียง การจำแนกเป็นกฎอย่างง่าย ควรเทียบกับภาพจริง', 'a 250 m pixel may mix neighbouring fields; the class is a simple rule, check it against imagery')}`;
   else if (S.ndviFailed) h = t(`ดึง NDVI ของจุดนี้จาก MODIS ไม่ได้ (${S.ndviFailed}) ส่วนอื่นยังใช้ได้ตามปกติ`, `Could not get MODIS NDVI for this point (${S.ndviFailed}). Everything else still works.`);
   else h = t('กำลังดึง NDVI 1 ปีล่าสุดรอบจุดนี้จาก MODIS… ส่วนอื่นใช้งานได้ระหว่างรอ', 'Fetching the last year of MODIS NDVI around this point… the rest of the page works meanwhile.');
   $('ndviNote').innerHTML = h;
@@ -1125,7 +1172,7 @@ function fieldInfo(st, ev, scores) {
   if (GRID) { GRID.info.forEach((ci, p) => { const r = Math.floor(p / GRID.n), c = p % GRID.n; if (inPoly(GRID.lat0 - (r + .5) * GRID.dLat, GRID.lon0 + (c + .5) * GRID.dLon, F.pts)) cells.push(ci); }); if (!cells.length) { const p = gridCell(F.lat, F.lon); if (p >= 0) cells.push(GRID.info[p]); } }
   const A = S.ndvi && S.ndvi.area, hiRisk = cells.length && typeof riskBreaks !== 'undefined' ? cells.filter(ci => ci.farm && riskBreaks.filter(b => ci.risk > b).length >= 3).length / cells.length : null;
   let pat = '—';
-  if (A && cells.length) { const cnt = {}; cells.forEach(ci => { if (ci.px >= 0 && A.rule[ci.px] >= 0) cnt[A.rule[ci.px]] = (cnt[A.rule[ci.px]] || 0) + 1; }); const tot = Object.values(cnt).reduce((a, b) => a + b, 0); if (tot) pat = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${L2(RNAME[k])} ${Math.round(v / tot * 100)}%`).join(' · '); }
+  if (A && cells.length) { const cnt = {}; cells.forEach(ci => { if (ci.fr >= 0) cnt[ci.fr] = (cnt[ci.fr] || 0) + 1; }); const tot = Object.values(cnt).reduce((a, b) => a + b, 0); if (tot) pat = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${L2(RNAME[k])} ${Math.round(v / tot * 100)}%`).join(' · '); }
   const best = scores.indexOf(Math.max(...scores)), m3 = mm => Math.round(mm * F.area / 1000).toLocaleString();
   const warn = [];
   if (F.area < MODIS_PX) warn.push(t(`แปลงเล็กกว่า pixel ดาวเทียม MODIS 1 ช่อง (6.25 ha ≈ 39 ไร่): NDVI และรูปแบบพืชพรรณที่เห็นรวมแปลงข้างเคียงด้วย ใช้ดูแนวโน้มของละแวกนี้ ไม่ใช่ของแปลงนี้โดยเฉพาะ`, `The field is smaller than one MODIS satellite pixel (6.25 ha): the NDVI and vegetation pattern include neighbouring fields. Read them as the neighbourhood, not this field alone`));

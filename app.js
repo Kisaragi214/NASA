@@ -446,11 +446,18 @@ function liveStatusHTML() {
   const rows = [['power', t('NASA POWER ภูมิอากาศ 2001–2025', 'NASA POWER climate 2001–2025')], ['recent', t('NASA POWER 90 วันล่าสุด', 'NASA POWER last 90 days')], ['soil', t('ดิน (SoilGrids)', 'Soil (SoilGrids)')], ['slope', t('ความลาดชัน (SRTM)', 'Slope (SRTM)')]];
   return rows.map(([k, l]) => `<li id="st-${k}" data-state="wait"><i></i>${l}<em></em></li>`).join('');
 }
+const fmtLat = v => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'N' : 'S'}`;
+const fmtLon = v => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'E' : 'W'}`;
+const fmtLL = (la, lo) => `${fmtLat(la)} ${fmtLon(lo)}`;
 function onMapClick(e) {
-  const { lat, lng } = e.latlng;
-  const btn = `<button type="button" class="btn" id="goLive" style="margin-top:6px">${t('วิเคราะห์จุดนี้ด้วยข้อมูล NASA สด', 'Analyse this point with live NASA data')}</button>`;
-  L.popup().setLatLng(e.latlng).setContent(`<b>${lat.toFixed(4)}, ${lng.toFixed(4)}</b><br>${btn}`).openOn(map);
-  setTimeout(() => { const b = $('goLive'); if (b) b.onclick = () => { map.closePopup(); loadLive(lat, lng); }; }, 0);
+  const lat = e.latlng.lat, lng = ((e.latlng.lng + 540) % 360) - 180;
+  const box = document.createElement('div');
+  const head = document.createElement('b'); head.textContent = fmtLL(lat, lng);
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.style.marginTop = '6px'; btn.style.display = 'block';
+  btn.textContent = t('วิเคราะห์จุดนี้ด้วยข้อมูล NASA สด', 'Analyse this point with live NASA data');
+  L.DomEvent.on(btn, 'click', ev => { L.DomEvent.stop(ev); map.closePopup(); loadLive(lat, lng); });
+  box.append(head, btn);
+  L.popup().setLatLng(e.latlng).setContent(box).openOn(map);
 }
 async function loadLive(lat, lon) {
   lon = ((lon + 540) % 360) - 180;
@@ -483,8 +490,8 @@ async function loadLive(lat, lon) {
   loadRecent(site);
 }
 function setLoc() {
-  $('locText').innerHTML = MODE === 'live' ? t(`จุดที่เลือก (ข้อมูลสด)<br>${S.lat.toFixed(3)}°, ${S.lon.toFixed(3)}°`, `Selected point (live data)<br>${S.lat.toFixed(3)}°, ${S.lon.toFixed(3)}°`) : t('พื้นที่เดโม: ลพบุรีตะวันออก 8×8 km<br>15.18°N 101.13°E', 'Demo area: east Lopburi, Thailand, 8×8 km<br>15.18°N 101.13°E');
-  if ($('liveTitle') && MODE === 'live') $('liveTitle').textContent = t(`จุด ${S.lat.toFixed(3)}, ${S.lon.toFixed(3)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${S.lat.toFixed(3)}, ${S.lon.toFixed(3)} · live NASA data (fetched ${S.fetched})`);
+  $('locText').innerHTML = MODE === 'live' ? t(`จุดที่เลือก (ข้อมูลสด)<br>${fmtLL(S.lat, S.lon)}`, `Selected point (live data)<br>${fmtLL(S.lat, S.lon)}`) : t('พื้นที่เดโม: ลพบุรีตะวันออก 8×8 km<br>15.180°N 101.130°E', 'Demo area: east Lopburi, Thailand, 8×8 km<br>15.180°N 101.130°E');
+  if ($('liveTitle') && MODE === 'live') $('liveTitle').textContent = t(`จุด ${fmtLL(S.lat, S.lon)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${fmtLL(S.lat, S.lon)} · live NASA data (fetched ${S.fetched})`);
 }
 function setMode(mode, site) {
   MODE = mode; S = site; evKey = ''; recCache.key = '';
@@ -499,7 +506,7 @@ function setMode(mode, site) {
       map.setView([DEMO.lat, DEMO.lon], 13);
     }
   }
-  $('liveTitle').textContent = mode === 'live' ? t(`จุด ${S.lat.toFixed(3)}, ${S.lon.toFixed(3)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${S.lat.toFixed(3)}, ${S.lon.toFixed(3)} · live NASA data (fetched ${S.fetched})`) : '';
+  $('liveTitle').textContent = mode === 'live' ? t(`จุด ${fmtLL(S.lat, S.lon)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${fmtLL(S.lat, S.lon)} · live NASA data (fetched ${S.fetched})`) : '';
   $('liveBox').hidden = mode !== 'live';
   $('layerBtns').closest('div').style.opacity = mode === 'live' ? .45 : 1;
   setLoc();
@@ -570,6 +577,19 @@ async function loadRecent(site) {
 ['cIrr', 'cMach', 'baseSel'].forEach(id => $(id).addEventListener('change', update));
 $('opac').addEventListener('input', paintCells);
 $('lTH').onclick = () => setLang('th'); $('lEN').onclick = () => setLang('en');
+function parseCoord(txt) {
+  const m = txt.trim().toUpperCase().replace(/,/g, ' ').match(/^(-?\d+(?:\.\d+)?)\s*°?\s*([NS])?\s+(-?\d+(?:\.\d+)?)\s*°?\s*([EW])?$/);
+  if (!m) return null;
+  let la = +m[1], lo = +m[3];
+  if (m[2] === 'S') la = -Math.abs(la); if (m[4] === 'W') lo = -Math.abs(lo);
+  return Math.abs(la) <= 90 && Math.abs(lo) <= 180 ? [la, lo] : null;
+}
+$('coordForm').addEventListener('submit', ev => {
+  ev.preventDefault();
+  const c = parseCoord($('coordIn').value);
+  if (!c) { $('coordMsg').textContent = t('อ่านพิกัดไม่ได้ ใช้รูปแบบ 30.9N 75.85E', 'Could not read that; use 30.9N 75.85E'); return; }
+  loadLive(c[0], c[1]);
+});
 $('backDemo').onclick = () => { setMode('demo', DEMO); loadRecent(DEMO); };
 document.body.dataset.lang = LANG;
 fetch('data/site.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => {

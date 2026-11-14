@@ -829,6 +829,11 @@ th{font-family:var(--f-display);font-weight:600}
       <label for="opac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oOpac">70%</output></label>
       <input id="opac" type="range" min="0" max="100" value="70">
     </div>
+    <form id="coordForm" class="ctl" autocomplete="off">
+      <label for="coordIn"><span><span class="th">ไปที่พิกัด</span><span class="en">Go to coordinates</span></span></label>
+      <div class="row" style="flex-wrap:nowrap"><input id="coordIn" type="text" placeholder="15.18N 101.13E" style="flex:1;min-width:0;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"><button type="submit" class="btn"><span class="th">วิเคราะห์</span><span class="en">Analyse</span></button></div>
+      <p class="note" id="coordMsg"><span class="th">เช่น 30.9N 75.85E หรือ 31.2S 60.5W</span><span class="en">e.g. 30.9N 75.85E or 31.2S 60.5W</span></p>
+    </form>
     <div id="liveBox" hidden>
       <div class="lbl"><span class="th">ข้อมูล NASA สด</span><span class="en">Live NASA data</span></div>
       <p class="note" id="liveTitle"></p>

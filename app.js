@@ -85,7 +85,7 @@ const PRIO = [
 ];
 
 let S = null, DEMO = null, MODE = 'demo', liveMarker = null;
-let mapMode = 'kmeans', map, cellLayer, cells = [], baseLayers = {}, curBase = 'esri', tileErrors = 0;
+let mapMode = 'rec', map, cellLayer, cells = [], baseLayers = {}, curBase = 'esri', tileErrors = 0;
 const charts = {};
 
 /* ---------- model ---------- */
@@ -144,24 +144,35 @@ function scoreAll(st, soilBoost = 0) {
   return { ev, nW, nH, nE, soil, scores };
 }
 
-/* ---------- terrain & cells ---------- */
+/* ---------- terrain & grids ---------- */
 const sFactor = s => { const th = Math.atan(s / 100); return s < 9 ? 10.8 * Math.sin(th) + 0.03 : 16.8 * Math.sin(th) - 0.5; };
-function cellInfo(p) {
-  const n = DEMO.grid.n, r = Math.floor(p / n), c = p % n;
-  const k = DEMO.kmeans.grid[r].charCodeAt(c) - 65, rule = DEMO.rules.grid[r].charCodeAt(c) - 65, slope = DEMO.slope[r][c];
-  const prof = DEMO.kmeans.profiles[k]; const nd = (prof[4] + prof[5] + prof[6] + prof[7] + prof[8]) / 5;
-  const C = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6));
-  return { r, c, k, rule, slope, risk: sFactor(slope) * C, farm: FARM.has(k), base: CLASS_BASE[k] };
-}
-let riskBreaks = [];
-function cellPolys() {
+/* GRID = { kind: 'demo' | 'live', n, cell (m), polys: [latlngs], info: [{ slope, k?, rule?, farm, base, risk }] } */
+let GRID = null, riskBreaks = [];
+const cellInfo = p => GRID.info[p];
+function demoGrid() {
   const g = DEMO.grid, n = g.n, toLL = (x, y) => { const lat = y / g.R; return [lat * 180 / Math.PI, x / (g.R * Math.cos(lat)) * 180 / Math.PI]; };
-  const out = [];
+  const polys = [], info = [];
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
     const x0 = g.xll + c * g.cell, x1 = x0 + g.cell, yT = g.yll + (n - r) * g.cell, yB = yT - g.cell;
-    out.push([toLL(x0, yT), toLL(x1, yT), toLL(x1, yB), toLL(x0, yB)]);
+    polys.push([toLL(x0, yT), toLL(x1, yT), toLL(x1, yB), toLL(x0, yB)]);
+    const k = DEMO.kmeans.grid[r].charCodeAt(c) - 65, rule = DEMO.rules.grid[r].charCodeAt(c) - 65, slope = DEMO.slope[r][c];
+    const prof = DEMO.kmeans.profiles[k], nd = (prof[4] + prof[5] + prof[6] + prof[7] + prof[8]) / 5;
+    const C = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6));
+    info.push({ k, rule, slope, risk: sFactor(slope) * C, farm: FARM.has(k), base: CLASS_BASE[k] });
   }
-  return out;
+  return { kind: 'demo', n, cell: Math.round(g.cell), polys, info };
+}
+/* Live grid: n×n square cells of `cell` metres centred on the point; slope from the DEM sampler */
+function liveGrid(site, n = 41, cell = 60) {
+  const dLat = cell / 111320, dLon = cell / (111320 * Math.cos(site.lat * Math.PI / 180)), h = (n - 1) / 2, polys = [], info = [];
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const la = site.lat + (h - r) * dLat, lo = site.lon + (c - h) * dLon;
+    polys.push([[la + dLat / 2, lo - dLon / 2], [la + dLat / 2, lo + dLon / 2], [la - dLat / 2, lo + dLon / 2], [la - dLat / 2, lo - dLon / 2]]);
+    let slope = NaN;
+    if (site.dem) { let sum = 0; for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) sum += site.dem.slope(la + a * dLat / 3, lo + b * dLon / 3); slope = Math.round(sum / 9 * 10) / 10; }
+    info.push({ slope, risk: isNaN(slope) ? 0 : sFactor(slope), farm: !isNaN(slope), base: null });
+  }
+  return { kind: 'live', n, cell, polys, info };
 }
 
 /* ---------- UI build ---------- */
@@ -172,19 +183,21 @@ function buildControls() {
   const prevInc = R.map((r, i) => $('inc' + i) ? $('inc' + i).value : Math.round(r.income * 10));
   $('incomeBox').innerHTML = R.map((r, i) => `<div class="ctl"><label for="inc${i}"><span>${r.id} · ${L2(r.name)}</span><output id="oInc${i}">${prevInc[i]}</output></label><input id="inc${i}" type="range" min="0" max="10" value="${prevInc[i]}"></div>`).join('');
   [...PRIO.map(p => p.id), ...R.map((_, i) => 'inc' + i)].forEach(id => $(id).addEventListener('input', update));
-  const bb = [['esri', {th:'ภาพละเอียดสูง',en:'High-res imagery'}], ['gibs', {th:'NASA MODIS ตามวันที่',en:'NASA MODIS by date'}], ['osm', {th:'แผนที่ถนน',en:'Street map'}]];
+  const bb = [['esri', {th:'ภาพละเอียดสูง',en:'High-res imagery'}], ['osm', {th:'แผนที่ถนน',en:'Street map'}], ['blank', {th:'ไม่มี',en:'None'}]];
   $('baseBtns').innerHTML = bb.map(([k, l]) => `<button type="button" class="btn" data-base="${k}" aria-pressed="${k === curBase}">${L2(l)}</button>`).join('');
-  const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended'}], ['kmeans', {th:'รูปแบบการปลูก (k-means)',en:'Cropping pattern (k-means)'}], ['rules', {th:'รูปแบบ (กฎ)',en:'Pattern (rules)'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['none', {th:'ไม่แสดง',en:'None'}]];
-  $('layerBtns').innerHTML = lb.map(([k, l]) => `<button type="button" class="btn" data-layer="${k}" aria-pressed="${k === mapMode}">${L2(l)}</button>`).join('');
+  const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended plan'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['slope', {th:'ความลาดชัน',en:'Slope'}], ['kmeans', {th:'รูปแบบการปลูก (k-means)',en:'Cropping pattern (k-means)'}, 1], ['rules', {th:'รูปแบบ (กฎ)',en:'Pattern (rules)'}, 1], ['none', {th:'ไม่แสดง',en:'None'}]];
+  $('layerBtns').innerHTML = lb.map(([k, l, demoOnly]) => `<button type="button" class="btn" data-layer="${k}" aria-pressed="${k === mapMode}"${demoOnly && GRID && GRID.kind !== 'demo' ? ' disabled title="demo only"' : ''}>${L2(l)}</button>`).join('');
+  $('satBtns').innerHTML = SAT.map(o => `<button type="button" class="btn" data-sat="${o.id}" aria-pressed="${o.id === curSat}">${L2(o.l)}</button>`).join('');
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => setBase(b.dataset.base));
-  document.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { mapMode = b.dataset.layer; document.querySelectorAll('[data-layer]').forEach(x => x.setAttribute('aria-pressed', x.dataset.layer === mapMode)); paintCells(); });
+  document.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { if (b.disabled) return; mapMode = b.dataset.layer; document.querySelectorAll('[data-layer]').forEach(x => x.setAttribute('aria-pressed', x.dataset.layer === mapMode)); paintCells(); });
+  document.querySelectorAll('[data-sat]').forEach(b => b.onclick = () => setSat(b.dataset.sat));
 }
 function setLang(l) {
   LANG = l; document.body.dataset.lang = l; document.documentElement.lang = l;
   try { localStorage.setItem('fs-lang', l); } catch (e) {}
   $('lTH').setAttribute('aria-pressed', l === 'th'); $('lEN').setAttribute('aria-pressed', l === 'en');
   if (!S) return;
-  buildControls(); update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc();
+  buildControls(); update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); satLegend();
   if (S.recentJSON) loadRecent(S);
   if (MODE === 'live' && $('liveList').children.length) $('liveList').innerHTML = liveStatusHTML().replace(/data-state="wait"/g, 'data-state="ok"');
 }
@@ -242,33 +255,99 @@ function update() {
 }
 
 /* ---------- map ---------- */
+/* NASA GIBS overlays (daily global imagery, no login) + SoilGrids WMS. `levels` = candidate tile-matrix levels; the first that loads is kept. */
+const SAT = [
+  { id: 'none', l: { th: 'ไม่แสดง', en: 'None' } },
+  { id: 'truecolor', gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor', levels: [9], fmt: 'jpg', res: '250 m', src: 'NASA MODIS Terra', l: { th: 'ภาพสีจริง', en: 'True colour' },
+    key: { th: 'ภาพถ่ายจริงวันที่เลือก (หน้าฝนมักมีเมฆ)', en: 'Actual image on the chosen day (often cloudy in the rainy season)' } },
+  { id: 'ndvi', gibs: 'MODIS_Terra_NDVI_8Day', levels: [9, 8], fmt: 'png', res: '250 m', src: 'NASA MODIS Terra NDVI 8-day', l: { th: 'พืชพรรณ NDVI', en: 'Vegetation NDVI' },
+    grad: ['#a9805a', '#e6d27a', '#9cc95a', '#2f8a3a', '#0d4f22'], lo: { th: 'ดินโล่ง', en: 'bare' }, hi: { th: 'พืชหนาแน่น', en: 'dense' } },
+  { id: 'lst', gibs: 'MODIS_Terra_Land_Surface_Temp_Day', levels: [7, 6], fmt: 'png', res: '1 km', src: 'NASA MODIS Terra LST (day)', l: { th: 'อุณหภูมิพื้นผิว', en: 'Land surface temp.' },
+    grad: ['#3b4cc0', '#7aa6f7', '#f2e6a0', '#f08a4b', '#b40426'], lo: { th: 'เย็น', en: 'cool' }, hi: { th: 'ร้อน', en: 'hot' } },
+  { id: 'smap', gibs: 'SMAP_L4_Analyzed_Root_Zone_Soil_Moisture', levels: [6, 7, 5], fmt: 'png', res: '9 km', src: 'NASA SMAP L4 root zone', l: { th: 'ความชื้นดิน', en: 'Soil moisture' },
+    grad: ['#a0522d', '#e8c27a', '#cfe8c0', '#5fa8d3', '#1d3f8f'], lo: { th: 'แห้ง', en: 'dry' }, hi: { th: 'ชื้น', en: 'wet' } },
+  { id: 'imerg', gibs: 'IMERG_Precipitation_Rate', levels: [6, 7, 5], fmt: 'png', res: '10 km', src: 'NASA GPM IMERG', time: d => d + 'T12:00:00Z', l: { th: 'ฝน (รายครึ่งชม.)', en: 'Rain rate' },
+    grad: ['#a6e3f5', '#3fa0d6', '#2b56c4', '#c43dc4', '#e8333a'], lo: { th: 'น้อย', en: 'light' }, hi: { th: 'หนัก', en: 'heavy' } },
+  { id: 'fire', gibs: 'VIIRS_SNPP_Thermal_Anomalies_375m_All', levels: [9, 8, 7, 6], fmt: 'png', res: '375 m', src: 'NASA VIIRS active fires', l: { th: 'ไฟ / การเผา', en: 'Fires / burning' },
+    key: { th: 'จุดแดง = ตรวจพบความร้อนผิดปกติ (ไฟหรือการเผาตอซัง)', en: 'Red dots = thermal anomalies (fires or stubble burning)' } },
+  { id: 'soil_ph', wms: 'https://maps.isric.org/mapserv?map=/map/phh2o.map', layer: 'phh2o_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'pH ดิน', en: 'Soil pH' },
+    grad: ['#d7191c', '#fdae61', '#ffffbf', '#abd9e9', '#2c7bb6'], lo: { th: 'กรด', en: 'acid' }, hi: { th: 'ด่าง', en: 'alkaline' } },
+  { id: 'soil_soc', wms: 'https://maps.isric.org/mapserv?map=/map/soc.map', layer: 'soc_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'คาร์บอนในดิน', en: 'Soil organic carbon' },
+    grad: ['#fff5d6', '#e3c08a', '#a8763e', '#6b4423', '#3a2410'], lo: { th: 'ต่ำ', en: 'low' }, hi: { th: 'สูง', en: 'high' } },
+  { id: 'soil_clay', wms: 'https://maps.isric.org/mapserv?map=/map/clay.map', layer: 'clay_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'ดินเหนียว %', en: 'Clay %' },
+    grad: ['#fff7bc', '#fec44f', '#ec7014', '#993404', '#4d1a02'], lo: { th: 'น้อย', en: 'low' }, hi: { th: 'มาก', en: 'high' } }
+];
+let curSat = 'none', satLayer = null, satLevelIdx = 0, satErr = 0;
+const gibsDate = () => $('gibsDate').value;
+function makeSat(o) {
+  if (o.wms) return L.tileLayer.wms(o.wms, { layers: o.layer, format: 'image/png', transparent: true, pane: 'sat', opacity: +$('satOpac').value / 100, attribution: o.src });
+  const lv = o.levels[Math.min(satLevelIdx, o.levels.length - 1)], tm = (o.time || (d => d))(gibsDate());
+  return L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${o.gibs}/default/${tm}/GoogleMapsCompatible_Level${lv}/{z}/{y}/{x}.${o.fmt}`,
+    { maxNativeZoom: lv, maxZoom: 18, pane: 'sat', opacity: +$('satOpac').value / 100, attribution: 'NASA GIBS / ' + o.src });
+}
+function setSat(id) {
+  curSat = id; satLevelIdx = 0; satErr = 0;
+  document.querySelectorAll('[data-sat]').forEach(b => b.setAttribute('aria-pressed', b.dataset.sat === id));
+  drawSat(); satLegend();
+}
+function drawSat() {
+  if (!map) return;
+  if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+  const o = SAT.find(x => x.id === curSat); $('satMsg').textContent = '';
+  $('dateBox').hidden = !o || !o.gibs;
+  if (!o || o.id === 'none') return;
+  satLayer = makeSat(o).addTo(map);
+  let ok = 0;
+  satLayer.on('tileload', () => { ok++; });
+  satLayer.on('tileerror', () => {
+    satErr++;
+    if (satErr === 4 && !ok && o.gibs && satLevelIdx < o.levels.length - 1) { satLevelIdx++; satErr = 0; drawSat(); }
+    else if (satErr === 6 && !ok) $('satMsg').textContent = t('ไม่มีภาพของวันที่นี้ ลองเลือกวันอื่น', 'No image for this date; try another day');
+  });
+}
+function satLegend() {
+  const o = SAT.find(x => x.id === curSat); let h = '';
+  if (o && o.id !== 'none') {
+    h = o.grad ? `<div style="height:10px;border-radius:5px;background:linear-gradient(90deg,${o.grad.join(',')})"></div><div class="row" style="justify-content:space-between;font-size:.75rem;color:var(--muted)"><span>${L2(o.lo)}</span><span>${L2(o.hi)}</span></div>` : `<p class="note">${L2(o.key)}</p>`;
+    h += `<p class="note">${o.src} · ${o.res}${o.grad ? t(' · สีโดยประมาณ ดูสเกลเต็มใน Worldview', ' · approximate colours; full scale in Worldview') : ''}</p>`;
+  }
+  $('satLegend').innerHTML = h;
+}
 function initMap() {
   if (!window.L) { $('map').innerHTML = `<p style="padding:16px">${t('โหลดแผนที่ไม่ได้', 'Map library failed to load')}</p>`; return; }
-  map = L.map('map', { preferCanvas: true, scrollWheelZoom: false }).setView([DEMO.lat, DEMO.lon], 13);
+  map = L.map('map', { preferCanvas: true, scrollWheelZoom: false, worldCopyJump: true }).setView([DEMO.lat, DEMO.lon], 13);
+  map.createPane('sat').style.zIndex = 350;
   const onErr = () => { tileErrors++; if (tileErrors > 6) { $('tileMsg').hidden = false; $('tileMsg').textContent = t('โหลดภาพพื้นหลังไม่ได้ในหน้านี้ (ใช้ได้เมื่อเปิดผ่าน GitHub Pages)', 'Base-map tiles cannot load in this viewer (they work on the hosted site)'); } };
   baseLayers.esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' }).on('tileerror', onErr);
   baseLayers.osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).on('tileerror', onErr);
-  baseLayers.gibs = L.tileLayer('https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg', { maxNativeZoom: 9, maxZoom: 18, time: $('gibsDate').value, attribution: 'NASA GIBS / EOSDIS · MODIS Terra' }).on('tileerror', onErr);
+  baseLayers.blank = L.layerGroup();
   baseLayers[curBase].addTo(map);
-  const polys = cellPolys();
-  cellLayer = L.layerGroup().addTo(map);
-  cells = polys.map((ll, p) => { const pl = L.polygon(ll, { weight: 0.3, color: '#ffffff', fillOpacity: .7, bubblingMouseEvents: false }); pl.on('click', e => cellPopup(p, e.latlng)); pl.addTo(cellLayer); return pl; });
-  const all = cells.map((_, p) => cellInfo(p)).filter(x => x.farm).map(x => x.risk);
-  riskBreaks = [0.2, 0.4, 0.6, 0.8].map(q => pct(all, q));
-  L.circleMarker([DEMO.lat, DEMO.lon], { radius: 6, color: '#ffffff', weight: 2, fillOpacity: 0 }).addTo(map);
+  const d = new Date(Date.now() - 3 * 864e5); $('gibsDate').value = d.toISOString().slice(0, 10);
   $('gibsDate').max = new Date().toISOString().slice(0, 10);
-  $('gibsDate').addEventListener('change', () => { baseLayers.gibs.options.time = $('gibsDate').value; baseLayers.gibs.redraw(); links(); });
+  $('gibsDate').addEventListener('change', () => { satLevelIdx = 0; satErr = 0; drawSat(); links(); });
+  $('satOpac').addEventListener('input', () => { $('oSatOpac').textContent = $('satOpac').value + '%'; if (satLayer) satLayer.setOpacity(+$('satOpac').value / 100); });
   map.on('click', onMapClick);
-  paintCells();
+  setGrid(demoGrid());
+}
+function setGrid(grid) {
+  GRID = grid;
+  if (cellLayer) map.removeLayer(cellLayer);
+  cellLayer = L.layerGroup().addTo(map);
+  cells = grid.polys.map((ll, p) => { const pl = L.polygon(ll, { weight: grid.kind === 'live' ? 0.2 : 0.3, color: '#ffffff', fillOpacity: .7, bubblingMouseEvents: false }); pl.on('click', e => cellPopup(p, e.latlng)); pl.addTo(cellLayer); return pl; });
+  const all = grid.info.filter(x => x.farm).map(x => x.risk);
+  riskBreaks = all.length ? [0.2, 0.4, 0.6, 0.8].map(q => pct(all, q)) : [0, 0, 0, 0];
+  if (grid.kind !== 'demo' && (mapMode === 'kmeans' || mapMode === 'rules')) mapMode = 'rec';
+  recCache.key = '';
+  buildControls(); paintCells();
 }
 function setBase(k) {
-  if (map) { map.removeLayer(baseLayers[curBase]); baseLayers[k].addTo(map); baseLayers[k].bringToBack(); }
-  curBase = k; $('dateBox').hidden = k !== 'gibs';
+  if (map) { map.removeLayer(baseLayers[curBase]); baseLayers[k].addTo(map); if (baseLayers[k].bringToBack) baseLayers[k].bringToBack(); }
+  curBase = k;
   document.querySelectorAll('[data-base]').forEach(b => b.setAttribute('aria-pressed', b.dataset.base === k));
 }
 let recCache = { key: '', best: [] };
 function recFor(st) {
-  const key = JSON.stringify(st) + R.map((_, i) => incomeOf(i)).join() + S.lat + ',' + S.lon;
+  const key = JSON.stringify(st) + R.map((_, i) => incomeOf(i)).join() + S.lat + ',' + S.lon + GRID.kind;
   if (recCache.key === key) return recCache.best;
   const memo = {}; const sMed = sFactor(3);
   const best = cells.map((_, p) => {
@@ -280,38 +359,42 @@ function recFor(st) {
   });
   recCache = { key, best }; return best;
 }
+const SLOPE_BRK = [2, 5, 8, 12], SLOPE_COL = ['#e8f1d8', '#b9d98a', '#e2c044', '#e08a3c', '#a83a1e'];
 function paintCells() {
-  if (MODE === 'live') { legend(); return; }
-  if (!map) { legend(); return; }
+  if (!map || !GRID) { if (GRID) legend(); return; }
   const op = +$('opac').value / 100; $('oOpac').textContent = Math.round(op * 100) + '%';
   const st = readState(); const rec = mapMode === 'rec' ? recFor(st) : null;
   cells.forEach((pl, p) => {
     const ci = cellInfo(p); let col = null;
-    if (mapMode === 'kmeans') col = KCOL[ci.k];
-    else if (mapMode === 'rules') col = RCOL[ci.rule];
+    if (mapMode === 'kmeans' && GRID.kind === 'demo') col = KCOL[ci.k];
+    else if (mapMode === 'rules' && GRID.kind === 'demo') col = RCOL[ci.rule];
     else if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
+    else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
     else if (mapMode === 'rec') col = rec[p] >= 0 ? PLAN_COL[rec[p]] : null;
     pl.setStyle(col ? { fillColor: col, fillOpacity: op, opacity: op > 0 ? .35 : 0 } : { fillOpacity: mapMode === 'none' ? 0 : op * .25, fillColor: '#888888', opacity: 0 });
   });
   legend(rec);
 }
 function legend(rec) {
-  const n = DEMO.grid.n * DEMO.grid.n; const count = f => { let c = 0; for (let p = 0; p < n; p++) if (f(p)) c++; return Math.round(c / n * 100) + '%'; };
+  const n = GRID.info.length; const count = f => { let c = 0; for (let p = 0; p < n; p++) if (f(p)) c++; return Math.round(c / n * 100) + '%'; };
+  const gridNote = GRID.kind === 'live' ? t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`) : t('กริด MODIS 33×33 ช่องละ 231 m (พื้นที่ตัวอย่าง)', 'MODIS grid 33×33, 231 m cells (example area)');
   let h = '';
-  if (MODE === 'live') { $('legend').innerHTML = `<p class="note">${t('ชั้นกริด (รูปแบบการปลูก, เสี่ยงดินพัง, แผนแนะนำ) มีเฉพาะพื้นที่เดโม จุดนี้ใช้ข้อมูล NASA สด ด้านล่าง', 'Grid layers (cropping pattern, erosion, recommendation) exist only for the demo area. This point uses live NASA data below.')}</p>`; return; }
   if (mapMode === 'kmeans') h = KNAME.map((nm, i) => `<span><i style="background:${KCOL[i]}"></i>${L2(nm)}<b>${count(p => cellInfo(p).k === i)}</b></span>`).join('');
   else if (mapMode === 'rules') h = RNAME.map((nm, i) => `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${count(p => cellInfo(p).rule === i)}</b></span>`).join('');
-  else if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${t('ความลาดชัน (SRTM) × พืชคลุมดินช่วง มี.ค.–พ.ค. (MODIS) จัดเป็น 5 ระดับเทียบกันในพื้นที่', 'Slope (SRTM) × Mar–May ground cover (MODIS), in local quintiles')}</p>`;
-  else if (mapMode === 'rec' && rec) h = R.map((r, i) => `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + `<span><i style="background:#888;opacity:.4"></i>${t('ไม่ใช่พื้นที่เกษตร', 'Not farmland')}<b>${count(p => rec[p] < 0)}</b></span><p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งพื้นที่ ความต่างระหว่างช่องจึงมาจากความลาดชันเท่านั้น', 'Climate and soil are uniform here, so cells differ only by slope')}</p>`;
-  $('legend').innerHTML = h;
+  else if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${GRID.kind === 'demo' ? t('ความลาดชัน (SRTM) × พืชคลุมดินช่วง มี.ค.–พ.ค. (MODIS) จัด 5 ระดับเทียบกันในพื้นที่', 'Slope (SRTM) × Mar–May ground cover (MODIS), local quintiles') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM), quintiles within the grid')}</p>`;
+  else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
+  else if (mapMode === 'rec' && rec) h = R.map((r, i) => `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่ใช่พื้นที่เกษตร / ไม่มีข้อมูล', 'Not farmland / no data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
+  $('legend').innerHTML = h + `<p class="note">${gridNote}</p>`;
 }
 function cellPopup(p, ll) {
   const ci = cellInfo(p), st = readState();
   const lvl = [t('ต่ำมาก', 'very low'), t('ต่ำ', 'low'), t('ปานกลาง', 'medium'), t('สูง', 'high'), t('สูงมาก', 'very high')][riskBreaks.filter(b => ci.risk > b).length];
-  let h = `<b>${L2(KNAME[ci.k])}</b><br>${t('รูปแบบตามกฎ', 'Rule class')}: ${L2(RNAME[ci.rule])}<br>${t('ความลาดชัน', 'Slope')}: ${ci.slope}%`;
+  let h = `<b>${fmtLL(ll.lat, ll.lng)}</b><br>`;
+  if (GRID.kind === 'demo') h += `${L2(KNAME[ci.k])}<br>${t('รูปแบบตามกฎ', 'Rule class')}: ${L2(RNAME[ci.rule])}<br>`;
+  h += `${t('ความลาดชัน', 'Slope')}: ${isNaN(ci.slope) ? '—' : ci.slope + '%'}`;
   if (ci.farm) {
-    const rec = recFor(st)[p];
-    h += `<br>${t('เสี่ยงดินพัง', 'Erosion risk')}: ${lvl}<br>${t('แผนที่น่าจะใช้อยู่', 'Likely current')}: ${R[ci.base].id} · ${L2(R[ci.base].name)}<br><b>${t('แนะนำ', 'Suggested')}: ${R[rec].id} · ${L2(R[rec].name)}</b>`;
+    const rec = recFor(st)[p], base = GRID.kind === 'demo' ? ci.base : st.base;
+    h += `<br>${t('เสี่ยงดินพัง', 'Erosion risk')}: ${lvl}<br>${t('แผนปัจจุบัน', 'Current')}: ${R[base].id} · ${L2(R[base].name)}<br><b>${t('แนะนำ', 'Suggested')}: ${R[rec].id} · ${L2(R[rec].name)}</b>`;
   } else h += `<br>${t('ไม่ใช่พื้นที่เกษตร ไม่แนะนำแผน', 'Not farmland; no suggestion')}`;
   L.popup().setLatLng(ll).setContent(h).openOn(map);
 }
@@ -424,19 +507,22 @@ function soilFromGrids(j) {
   const w = v => (v[0] * 5 + v[1] * 10 + v[2] * 15) / 30;
   return { ph: +w(lay.phh2o).toFixed(2), om: +(w(lay.soc) / 10 * 1.72).toFixed(2), clay: Math.round(w(lay.clay)), sand: Math.round(w(lay.sand)), paw: Math.round(paw.reduce((a, b) => a + b, 0)), deepStore: Math.round(paw[4] + 0.5 * paw[3]) };
 }
-/* Slope (%) samples within ~125 m of the point from SRTM-derived terrain tiles (terrarium) */
-async function slopeAt(lat, lon) {
+/* DEM sampler around a point from SRTM-derived terrain tiles (terrarium, zoom 13, 3×3 tiles ≈ ±7 km). slope(la, lo) → % */
+async function demSampler(lat, lon) {
   const z = 13, n = 2 ** z, fx = (lon + 180) / 360 * n, r = lat * Math.PI / 180, fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
   const x0 = Math.floor(fx) - 1, y0 = Math.floor(fy) - 1, cv = document.createElement('canvas'); cv.width = cv.height = 768;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   await Promise.all([0, 1, 2].flatMap(i => [0, 1, 2].map(j => new Promise((ok, no) => {
     const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => { ctx.drawImage(im, i * 256, j * 256); ok(); }; im.onerror = no;
-    im.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x0 + i}/${y0 + j}.png`; }))));
-  const px = ctx.getImageData(0, 0, 768, 768).data, el = (X, Y) => { const k = (Math.round(Y) * 768 + Math.round(X)) * 4; return px[k] * 256 + px[k + 1] + px[k + 2] / 256 - 32768; };
-  const res = 156543.03392 * Math.cos(r) / n, cX = (fx - x0) * 256, cY = (fy - y0) * 256, step = 125 / res / 3, out = [];
-  for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) { const X = cX + a * step, Y = cY + b * step;
-    out.push(Math.hypot((el(X + 1, Y) - el(X - 1, Y)) / (2 * res), (el(X, Y + 1) - el(X, Y - 1)) / (2 * res)) * 100); }
-  return out;
+    im.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${(x0 + i + n) % n}/${y0 + j}.png`; }))));
+  const px = ctx.getImageData(0, 0, 768, 768).data;
+  const el = (X, Y) => { X = Math.max(0, Math.min(767, Math.round(X))); Y = Math.max(0, Math.min(767, Math.round(Y))); const k = (Y * 768 + X) * 4; return px[k] * 256 + px[k + 1] + px[k + 2] / 256 - 32768; };
+  const res = 156543.03392 * Math.cos(r) / n;
+  const toXY = (la, lo) => { const rr = la * Math.PI / 180; return [((lo + 180) / 360 * n - x0) * 256, ((1 - Math.log(Math.tan(rr) + 1 / Math.cos(rr)) / Math.PI) / 2 * n - y0) * 256]; };
+  const slope = (la, lo) => { const [X, Y] = toXY(la, lo); return Math.hypot((el(X + 1, Y) - el(X - 1, Y)) / (2 * res), (el(X, Y + 1) - el(X, Y - 1)) / (2 * res)) * 100; };
+  const samples = [], dLat = 125 / 111320 / 3, dLon = 125 / (111320 * Math.cos(r)) / 3;
+  for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) samples.push(slope(lat + a * dLat, lon + b * dLon));
+  return { slope, samples };
 }
 function setStatus(id, state, msg) {
   const el = $('st-' + id); if (!el) return;
@@ -471,7 +557,7 @@ async function loadLive(lat, lon) {
     const [pw, sg, slp] = await Promise.allSettled([
       getJSON(powerURL(lat, lon, '20010101', '20251231'), 60000),
       getJSON(`https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon.toFixed(4)}&lat=${lat.toFixed(4)}&property=phh2o&property=soc&property=clay&property=sand&depth=0-5cm&depth=5-15cm&depth=15-30cm&depth=30-60cm&depth=60-100cm&value=mean`, 30000),
-      slopeAt(lat, lon)
+      demSampler(lat, lon)
     ]);
     if (pw.status !== 'fulfilled') {
       setStatus('power', 'err', t('ดึงไม่ได้ ใช้พื้นที่เดโมต่อ', 'failed; staying on demo area'));
@@ -481,9 +567,9 @@ async function loadLive(lat, lon) {
     setStatus('power', 'ok', cl.days.length.toLocaleString() + t(' วัน', ' days'));
     let soil = sg.status === 'fulfilled' ? soilFromGrids(sg.value) : null, soilFallback = false;
     if (soil) setStatus('soil', 'ok', 'pH ' + soil.ph); else { soil = DEMO.soil; soilFallback = true; setStatus('soil', 'err', t('ไม่มีค่า ใช้ค่าเดโม', 'no value; demo soil used')); }
-    const slopeSamples = slp.status === 'fulfilled' ? slp.value : [];
+    const dem = slp.status === 'fulfilled' ? slp.value : null, slopeSamples = dem ? dem.samples : [];
     setStatus('slope', slopeSamples.length ? 'ok' : 'err', slopeSamples.length ? pct(slopeSamples, .5).toFixed(0) + '%' : t('ดึงไม่ได้', 'failed'));
-    site = { name: 'live', lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, soil, soilFallback, slopeSamples, fetched: new Date().toISOString().slice(0, 10) };
+    site = { name: 'live', lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, soil, soilFallback, slopeSamples, dem, fetched: new Date().toISOString().slice(0, 10) };
     liveCache.set(key, site);
   } else ['power', 'soil', 'slope'].forEach(k => setStatus(k, 'ok', t('จากแคช', 'cached')));
   setMode('live', site);
@@ -497,18 +583,17 @@ function setMode(mode, site) {
   MODE = mode; S = site; evKey = ''; recCache.key = '';
   if (map) {
     if (mode === 'live') {
-      if (map.hasLayer(cellLayer)) map.removeLayer(cellLayer);
-      if (liveMarker) liveMarker.setLatLng([S.lat, S.lon]); else liveMarker = L.circleMarker([S.lat, S.lon], { radius: 8, color: '#ffffff', weight: 3, fillColor: '#c4512b', fillOpacity: 1 }).addTo(map);
-      map.setView([S.lat, S.lon], Math.max(map.getZoom(), 11));
+      if (liveMarker) liveMarker.setLatLng([S.lat, S.lon]); else liveMarker = L.circleMarker([S.lat, S.lon], { radius: 7, color: '#ffffff', weight: 3, fillColor: '#c4512b', fillOpacity: 1, interactive: false }).addTo(map);
+      setGrid(liveGrid(S));
+      map.setView([S.lat, S.lon], 14);
     } else {
-      if (!map.hasLayer(cellLayer)) cellLayer.addTo(map);
       if (liveMarker) { map.removeLayer(liveMarker); liveMarker = null; }
+      setGrid(demoGrid());
       map.setView([DEMO.lat, DEMO.lon], 13);
     }
   }
   $('liveTitle').textContent = mode === 'live' ? t(`จุด ${fmtLL(S.lat, S.lon)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${fmtLL(S.lat, S.lon)} · live NASA data (fetched ${S.fetched})`) : '';
   $('liveBox').hidden = mode !== 'live';
-  $('layerBtns').closest('div').style.opacity = mode === 'live' ? .45 : 1;
   setLoc();
   document.querySelectorAll('.demoOnly').forEach(el => el.hidden = mode === 'live');
   if (mode === 'demo') { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
@@ -590,11 +675,11 @@ $('coordForm').addEventListener('submit', ev => {
   if (!c) { $('coordMsg').textContent = t('อ่านพิกัดไม่ได้ ใช้รูปแบบ 30.9N 75.85E', 'Could not read that; use 30.9N 75.85E'); return; }
   loadLive(c[0], c[1]);
 });
-$('backDemo').onclick = () => { setMode('demo', DEMO); loadRecent(DEMO); };
+$('backDemo').onclick = () => { setMode('demo', DEMO); loadRecent(DEMO); $('liveBox').hidden = true; };
 document.body.dataset.lang = LANG;
 fetch('data/site.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => {
   DEMO = d; S = d; buildControls(); setLang(LANG); initMap(); paintCells();
   const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', drawCharts);
   const m = location.hash.match(/^#p=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
-  if (m) loadLive(+m[1], +m[2]); else loadRecent(DEMO);
+  if (m) loadLive(+m[1], +m[2]); else loadLive(DEMO.lat, DEMO.lon);
 }).catch(e => { $('summary').textContent = t('โหลดข้อมูลไม่ได้: ', 'Could not load data: ') + e.message; });

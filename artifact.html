@@ -695,16 +695,19 @@ h3{font-family:var(--f-display);font-weight:600;font-size:1rem;margin:0}
 .loc{font-family:var(--f-mono);font-size:.78rem;color:var(--muted);text-align:right}
 .banner{margin:14px 0 18px;padding:10px 14px;border-left:4px solid var(--warn);background:var(--panel);font-size:.9rem}
 button,select,input{font:inherit}
-.btn{font-size:.85rem;padding:5px 12px;border-radius:99px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.btn{font-size:.82rem;padding:4px 10px;border-radius:99px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.btn:disabled{opacity:.4;cursor:not-allowed}
 .btn[aria-pressed="true"]{background:var(--crop);color:var(--panel);border-color:var(--crop)}
 .btn:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--water);outline-offset:2px}
 a{color:var(--water)}
 section.block{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
 .mapband{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px;margin-bottom:20px}
 @media (max-width:860px){.mapband{grid-template-columns:minmax(0,1fr)}}
-#map{height:480px;border-radius:8px;border:1px solid var(--line);background:var(--chip);z-index:0}
+#map{height:560px;border-radius:8px;border:1px solid var(--line);background:var(--chip);z-index:0}
 @media (max-width:640px){#map{height:380px}}
-.mapctl{display:flex;flex-direction:column;gap:12px;font-size:.86rem;min-width:0}
+.mapctl{display:flex;flex-direction:column;gap:12px;font-size:.86rem;min-width:0;max-height:560px;overflow-y:auto;padding-right:4px}
+@media (max-width:860px){.mapctl{max-height:none;overflow:visible}}
+.mapband>div:first-child{align-self:start}
 .row{display:flex;flex-wrap:wrap;gap:6px}
 .lbl{font-size:.74rem;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
 .legend{display:flex;flex-direction:column;gap:5px;font-size:.82rem}
@@ -804,36 +807,45 @@ th{font-family:var(--f-display);font-weight:600}
     <div id="tileMsg" hidden></div>
   </div>
   <div class="mapctl">
-    <div>
-      <div class="lbl"><span class="th">ภาพพื้นหลัง</span><span class="en">Base map</span></div>
-      <div class="row" id="baseBtns"></div>
-      <div class="ctl" id="dateBox" style="margin-top:6px" hidden>
-        <label for="gibsDate"><span class="th">วันที่ภาพ NASA</span><span class="en">NASA image date</span></label>
-        <input id="gibsDate" type="date" min="2000-02-24" value="2025-03-20">
-        <p class="note"><span class="th">MODIS Terra 250 m รายวัน · หน้าฝนมักมีเมฆ</span><span class="en">MODIS Terra 250 m, daily · often cloudy in the rainy season</span></p>
-      </div>
-    </div>
-    <div>
-      <div class="lbl"><span class="th">ชั้นข้อมูลวิเคราะห์</span><span class="en">Analysis layer</span></div>
-      <div class="row" id="layerBtns"></div>
-    </div>
-    <div class="ctl">
-      <label for="opac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oOpac">70%</output></label>
-      <input id="opac" type="range" min="0" max="100" value="70">
-    </div>
     <form id="coordForm" class="ctl" autocomplete="off">
       <label for="coordIn"><span><span class="th">ไปที่พิกัด</span><span class="en">Go to coordinates</span></span></label>
       <div class="row" style="flex-wrap:nowrap"><input id="coordIn" type="text" placeholder="15.18N 101.13E" style="flex:1;min-width:0;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"><button type="submit" class="btn"><span class="th">วิเคราะห์</span><span class="en">Analyse</span></button></div>
-      <p class="note" id="coordMsg"><span class="th">เช่น 30.9N 75.85E หรือ 31.2S 60.5W</span><span class="en">e.g. 30.9N 75.85E or 31.2S 60.5W</span></p>
+      <p class="note" id="coordMsg"><span class="th">เช่น 30.9N 75.85E หรือ 31.2S 60.5W · หรือคลิกแผนที่นอกกริด</span><span class="en">e.g. 30.9N 75.85E or 31.2S 60.5W · or click the map outside the grid</span></p>
     </form>
     <div id="liveBox" hidden>
       <div class="lbl"><span class="th">ข้อมูล NASA สด</span><span class="en">Live NASA data</span></div>
       <p class="note" id="liveTitle"></p>
       <ul class="live" id="liveList"></ul>
-      <button type="button" class="btn" id="backDemo"><span class="th">กลับไปพื้นที่เดโม</span><span class="en">Back to demo area</span></button>
+      <button type="button" class="btn" id="backDemo"><span class="th">ดูตัวอย่างลพบุรี (มี k-means)</span><span class="en">Lopburi example (with k-means)</span></button>
     </div>
-    <div class="legend" id="legend"></div>
-    <p class="note"><span class="th"><b>คลิกตรงไหนก็ได้ในโลก</b> (นอกกริด) เพื่อวิเคราะห์ด้วยข้อมูล NASA สด · คลิกช่องในกริดเพื่อดูรายละเอียดพื้นที่เดโม (1 ช่อง ≈ 231 m)</span><span class="en"><b>Click anywhere on Earth</b> (outside the grid) to analyse it with live NASA data · click a grid cell for demo-area details (1 cell ≈ 231 m)</span></p>
+    <div>
+      <div class="lbl"><span class="th">ผลวิเคราะห์ (แถบรวม)</span><span class="en">Analysis (combined)</span></div>
+      <div class="row" id="layerBtns"></div>
+      <div class="ctl" style="margin-top:6px">
+        <label for="opac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oOpac">70%</output></label>
+        <input id="opac" type="range" min="0" max="100" value="70">
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <details open>
+      <summary class="lbl" style="cursor:pointer"><span class="th">แถบสแกนดาวเทียม (แยกชุดข้อมูล)</span><span class="en">Satellite layers (one dataset each)</span></summary>
+      <div class="row" id="satBtns" style="margin-top:6px"></div>
+      <div class="ctl" id="dateBox" style="margin-top:6px" hidden>
+        <label for="gibsDate"><span class="th">วันที่ภาพ NASA</span><span class="en">NASA image date</span></label>
+        <input id="gibsDate" type="date" min="2000-02-24">
+      </div>
+      <div class="ctl" style="margin-top:6px">
+        <label for="satOpac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oSatOpac">80%</output></label>
+        <input id="satOpac" type="range" min="0" max="100" value="80">
+      </div>
+      <div id="satLegend"></div>
+      <p class="note" id="satMsg"></p>
+      <p class="note"><span class="th">แถบนี้อยู่ใต้กริด ตั้งผลวิเคราะห์เป็น "ไม่แสดง" หรือลดความทึบเพื่อดู</span><span class="en">These sit under the grid; set the analysis to "None" or lower its opacity to see them</span></p>
+    </details>
+    <details>
+      <summary class="lbl" style="cursor:pointer"><span class="th">ภาพพื้นหลัง</span><span class="en">Base map</span></summary>
+      <div class="row" id="baseBtns" style="margin-top:6px"></div>
+    </details>
     <div class="row">
       <a id="lnkWV" target="_blank" rel="noopener"><span class="th">เปิดใน NASA Worldview (HLS 30 m) ↗</span><span class="en">Open in NASA Worldview (HLS 30 m) ↗</span></a>
       <a id="lnkGE" target="_blank" rel="noopener"><span class="th">เปิดใน Google Earth ↗</span><span class="en">Open in Google Earth ↗</span></a>

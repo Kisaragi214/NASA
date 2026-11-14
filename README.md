@@ -11,20 +11,21 @@ Field Shift Map compares crop-rotation options for a farm area by:
 - **pest-cycle break**
 - **income:** set by the user
 
-The user sets their own priorities and farm constraints. It maps current cropping patterns (k-means and rule-based phenology on MODIS NDVI) and erosion risk (SRTM slope × MODIS ground cover). Every recommendation lists its reason, evidence, benefits, information gaps and risks to check locally.
+The user sets their own priorities and farm constraints. It works for any point on Earth: it reads the last year of MODIS NDVI at the point, maps slope and erosion risk on a 60 m grid, and compares the last 90 days of weather with the 25-year normal. Every recommendation lists its reason, evidence, benefits, information gaps and risks to check locally.
 
 > This tool supports, and does not replace, the judgment of farmers and local agricultural experts.
 
 ## Data
 
+Nothing is precomputed. Every site is fetched live in the browser when the user clicks the map, types coordinates or uses their location.
+
 | Role | Dataset | Access |
 |---|---|---|
-| Climate 2001–2025 | **NASA POWER** daily (T2M_MAX, T2M_MIN, PRECTOTCORR) | POWER API |
-| Vegetation / cropping pattern | **MODIS MOD13Q1** NDVI 250 m + pixel reliability | ORNL DAAC MODIS Web Service |
-| Land cover | **MODIS MCD12Q1** LC_Type1 | ORNL DAAC MODIS Web Service |
-| Terrain | SRTM-derived elevation (AWS Terrain Tiles) | public tiles |
-| Imagery (display only) | **NASA GIBS** MODIS Terra true colour; HLS 30 m via Worldview link | GIBS WMTS |
-| Soil (supplementary) | SoilGrids 2.0 (ISRIC) | REST API |
+| Climate 2001–2025 and the last 90 days | **NASA POWER** daily (T2M_MAX, T2M_MIN, PRECTOTCORR) | POWER API |
+| Vegetation at the point, last year | **MODIS MOD13Q1** NDVI 250 m + pixel reliability | ORNL DAAC MODIS Web Service |
+| Slope, 60 m grid around the point | SRTM-derived elevation (AWS Terrain Tiles) | public tiles |
+| Map layers by date | **NASA GIBS**: MODIS true colour, NDVI, land surface temperature, SMAP root-zone soil moisture, GPM IMERG rain, VIIRS fires | GIBS WMTS / WMS |
+| Soil (supplementary) | SoilGrids 2.0 (ISRIC) | REST API + WMS |
 | Base map (display only) | Esri World Imagery, OpenStreetMap | tiles |
 
 Crop coefficients follow FAO-56 (Table 12). Plant-available water uses Saxton & Rawls (2006).
@@ -32,14 +33,6 @@ Crop coefficients follow FAO-56 (Table 12). Plant-available water uses Saxton & 
 ## Run locally
 
 ```bash
-# 1) data (several minutes; the ORNL service is slow)
-cd pipeline
-pip install requests numpy pillow scikit-learn
-python fetch_data.py --lat 15.18 --lon 101.13 --km 4 --years 2022 2024
-python build_site.py --k 6          # writes ../data/site.json
-
-# 2) web app
-cd ..
 python -m http.server 8000          # open http://localhost:8000
 ```
 
@@ -47,22 +40,23 @@ python -m http.server 8000          # open http://localhost:8000
 
 ## Deploy
 
-Push the repository to GitHub, then go to **Settings → Pages** and choose **Deploy from branch** (`main`, root). The site is static.
+Push to GitHub, then **Settings → Pages → Deploy from branch** (`main`, root). The site is static.
 
 ## Limitations
 
-- Climate (POWER) is ~50 km and soil is a single point. Within the 8×8 km demo, cells differ only by slope and ground cover.
-- At 250 m, MODIS never shows fully bare soil (NDVI < 0.3). Small fields may be bare but get averaged with their neighbours. HLS 30 m can confirm this.
-- Cluster names are interpreted from NDVI curves and have not been verified with field data.
-- Income and some soil-role scores are user-set or rule-based, not measured.
-- k-means uses random initialisation, so cluster numbering can change between runs.
+- Climate (POWER) is ~50 km and soil is 250 m, so one value covers the whole 60 m grid. Cells differ only by slope.
+- NDVI is one 250 m MODIS pixel. Small fields are mixed with their neighbours, and the pattern class is a simple rule that has not been checked in the field.
+- The ORNL MODIS service is slow (about a minute). The rest of the page works while it loads.
+- The five rotations are a starter set for tropical field crops. They are not yet screened per location (planned: ECOCROP screening, `data/crops.json`).
+- Income and the soil-role scores are user-set or rule-based, not measured.
+- GIBS layer colours in the legend are approximate.
 
 ## Future work
 
-- SMAP / SMAP L4 root-zone moisture and GPM IMERG rainfall (Earthdata login), and GRACE-FO water storage trends.
-- Click-anywhere mode: live POWER + MODIS queries for any location.
-- Plug in higher-resolution national data where it exists (e.g. US CDL, SSURGO, OpenET; Thai LDD soil series).
-- HLS 30 m classification for field-level patterns.
+- Screen crops per location with ECOCROP and build rotations automatically.
+- Draw a field polygon.
+- SMAP and GPM IMERG values in the scoring (they are map layers only for now).
+- Plug in higher-resolution national data where it exists (e.g. US CDL, SSURGO, OpenET).
 
 ## AI disclosure
 

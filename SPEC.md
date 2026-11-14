@@ -1,5 +1,7 @@
 # SPEC — next iteration: global, dynamic crop-rotation advice
 
+> **Status, 14 Nov evening:** T1, T2 and T6 are done, and the app is live-only: the Lopburi demo data, the k-means layers and `pipeline/` were removed. The satellite layer panel (NASA GIBS + SoilGrids) and the 60 m slope grid are in. **Next: T3, then T4.** Where the text below mentions the demo area or `site.json`, ignore it.
+
 ## Goal
 
 The user clicks anywhere on Earth, or draws their field. The app then:

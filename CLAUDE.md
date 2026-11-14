@@ -10,12 +10,13 @@ The tool is a static web app: HTML/JS + Leaflet + Chart.js, hosted on GitHub Pag
 | File | Role |
 |---|---|
 | `index.src.html` | Page markup and CSS. **Edit this, not `index.html`.** Then run `python build.py`, which inlines `leaflet.min.css` and writes `index.html` (full doc) + `artifact.html` (no doc skeleton, used for Claude previews). |
-| `app.js` | All logic: model, scoring, map, charts, i18n. |
-| `data/site.json` | Precomputed demo area (east Lopburi, 15.18N 101.13E, 33×33 MODIS cells). Doubles as the offline fallback. |
-| `pipeline/fetch_data.py`, `pipeline/build_site.py` | Rebuild `site.json` for any site. Tested only on synthetic input so far. |
+| `app.js` | All logic: live data loading, model, scoring, map, charts, i18n. |
+| `data/crops.json` | 38 crops from ECOCROP with role tags, for T3 (not used by the app yet). |
 | `manifest.webmanifest`, `README.md` | PWA manifest, public readme (data list, limitations, AI disclosure). |
 
-To run locally: `python -m http.server 8000`. Opening the file directly breaks `fetch('data/site.json')`.
+There is **no precomputed site data**. The app starts at a default point and fetches everything live (`loadLive` → `applySite`, then `loadRecent` and `loadNdvi` in the background).
+
+To run locally: `python -m http.server 8000`.
 
 ## Rules that must not break
 
@@ -27,7 +28,7 @@ To run locally: `python -m http.server 8000`. Opening the file directly breaks `
   - Dynamic text: `t(th, en)`, or `{th, en}` objects read through `L2()`.
 - **Never present guessed or user-set values as measured.** Income is user-set. ECOCROP ranges are global and coarse. Say so in the cards.
 - **Keep the uncertainty outputs:** dry-year (P80) water need, years short > 150 mm, confidence line.
-- **Fallback:** the page must still work (demo area) if any live API fails or is slow.
+- **Failure handling:** POWER is required (show the error + Retry). SoilGrids, slope and NDVI are optional: the page must still work without each, and say what is missing or assumed.
 - **No build step or framework.** Libraries come from cdnjs only, pinned to exact versions. Keep the whole app static.
 
 ## Live APIs

@@ -1,6 +1,7 @@
 'use strict';
 /* Field Shift Map — crop-rotation decision support from NASA Earth observations.
-   Data: data/site.json (built by pipeline/build_site.py). All scoring runs in the browser. */
+   No precomputed data: every site is fetched live (NASA POWER, MODIS via ORNL DAAC, SRTM-derived DEM, SoilGrids).
+   All scoring runs in the browser. */
 
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -59,22 +60,11 @@ const R = [
     forage:{th:'ใบและเมล็ดเป็นอาหารสัตว์ได้ดี',en:'Leaves and grain are good fodder'} }
 ];
 const PLAN_COL = ['#a7a39a','#2f7d4f','#9ab83a','#8a5a33','#5b6fb0'];
-const KNAME = [
-  {th:'พืชไร่อายุยาว (ต่ำสุด มี.ค.–เม.ย.)',en:'Long-season field crop (low Mar–Apr)'},
-  {th:'พืชพรรณบาง / ชุมชน',en:'Sparse vegetation / settlement'},
-  {th:'พืชปน คลุมดินน้อย',en:'Mixed crops, low cover'},
-  {th:'ป่า / ไม้ยืนต้น',en:'Forest / tree cover'},
-  {th:'พืชปนไม้ คลุมดินปานกลาง',en:'Crops with trees, medium cover'},
-  {th:'พืชไร่อายุยาว (ต่ำสุด เม.ย.–พ.ค.)',en:'Long-season field crop (low Apr–May)'}
-];
-const KCOL = ['#c49a1c','#a7a39a','#c8cf86','#1f5e3a','#6f9a5a','#8a5a33'];
 const RNAME = [
   {th:'ป่า / ไม้ยืนต้น',en:'Forest / trees'},{th:'โล่ง / ชุมชน / น้ำ',en:'Bare / built / water'},
   {th:'พืชสองฤดู',en:'Two-season crop'},{th:'พืชฤดูเดียว (สั้น)',en:'Single short season'},{th:'พืชไร่อายุยาว',en:'Long-season crop'}
 ];
 const RCOL = ['#1f5e3a','#a7a39a','#2a6f9e','#c49a1c','#8a5a33'];
-const FARM = new Set([0,2,4,5]);
-const CLASS_BASE = {0:3, 5:3, 2:0, 4:0};
 const RISK_COL = ['#2f7d4f','#9ab83a','#e2c044','#e08a3c','#c4512b'];
 const PRIO = [
   { id:'wWater', v:3, l:{th:'ประหยัดน้ำ',en:'Save water'} },
@@ -84,7 +74,10 @@ const PRIO = [
   { id:'wIncome', v:2, l:{th:'รายได้',en:'Income'} }
 ];
 
-let S = null, DEMO = null, MODE = 'demo', liveMarker = null;
+let S = null, liveMarker = null, loadSeq = 0;
+const DEFAULT_POINT = [15.18, 101.13];
+/* Used only when SoilGrids has no value at the point (water, urban, ice); flagged in the UI */
+const SOIL_DEFAULT = { ph: 6.5, om: 2, clay: 25, sand: 40, paw: 120, deepStore: 60 };
 let mapMode = 'rec', map, cellLayer, cells = [], baseLayers = {}, curBase = 'esri', tileErrors = 0;
 const charts = {};
 
@@ -146,33 +139,9 @@ function scoreAll(st, soilBoost = 0) {
 
 /* ---------- terrain & grids ---------- */
 const sFactor = s => { const th = Math.atan(s / 100); return s < 9 ? 10.8 * Math.sin(th) + 0.03 : 16.8 * Math.sin(th) - 0.5; };
-/* GRID = { kind: 'demo' | 'live', n, cell (m), polys: [latlngs], info: [{ slope, k?, rule?, farm, base, risk }] } */
+/* GRID = { n, cell (m), polys: [latlngs], info: [{ slope, farm, risk }] } */
 let GRID = null, riskBreaks = [];
 const cellInfo = p => GRID.info[p];
-function demoGrid() {
-  /* MODIS sinusoidal pixels form a sheared parallelogram on a web map. Resample (nearest pixel) onto an upright
-     lat/lon grid of the same 231 m spacing, keeping only the rectangle fully covered by data. */
-  const g = DEMO.grid, n = g.n, R = g.R;
-  const ll = (x, y) => { const lat = y / R; return [lat * 180 / Math.PI, x / (R * Math.cos(lat)) * 180 / Math.PI]; };
-  const rowLat = r => ll(0, g.yll + (n - r - 0.5) * g.cell)[0];
-  const colLon = (r, c) => ll(g.xll + (c + 0.5) * g.cell, g.yll + (n - r - 0.5) * g.cell)[1];
-  let lonMin = -Infinity, lonMax = Infinity;
-  for (let r = 0; r < n; r++) { lonMin = Math.max(lonMin, colLon(r, 0)); lonMax = Math.min(lonMax, colLon(r, n - 1)); }
-  const lat0 = rowLat((n - 1) / 2), dLon = g.cell / (111320 * Math.cos(lat0 * Math.PI / 180)), hLat = (rowLat(0) - rowLat(1)) / 2;
-  const cols = Math.floor((lonMax - lonMin) / dLon) + 1, polys = [], info = [];
-  for (let r = 0; r < n; r++) {
-    const la = rowLat(r), c0 = colLon(r, 0), dl = colLon(r, 1) - c0;
-    for (let j = 0; j < cols; j++) {
-      const lo = lonMin + j * dLon, c = Math.max(0, Math.min(n - 1, Math.round((lo - c0) / dl)));
-      polys.push([[la + hLat, lo - dLon / 2], [la + hLat, lo + dLon / 2], [la - hLat, lo + dLon / 2], [la - hLat, lo - dLon / 2]]);
-      const k = DEMO.kmeans.grid[r].charCodeAt(c) - 65, rule = DEMO.rules.grid[r].charCodeAt(c) - 65, slope = DEMO.slope[r][c];
-      const prof = DEMO.kmeans.profiles[k], nd = (prof[4] + prof[5] + prof[6] + prof[7] + prof[8]) / 5;
-      const C = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6));
-      info.push({ k, rule, slope, risk: sFactor(slope) * C, farm: FARM.has(k), base: CLASS_BASE[k] });
-    }
-  }
-  return { kind: 'demo', n, cols, cell: Math.round(g.cell), polys, info };
-}
 /* Live grid: n×n square cells of `cell` metres centred on the point; slope from the DEM sampler */
 function liveGrid(site, n = 41, cell = 60) {
   const dLat = cell / 111320, dLon = cell / (111320 * Math.cos(site.lat * Math.PI / 180)), h = (n - 1) / 2, polys = [], info = [];
@@ -183,38 +152,41 @@ function liveGrid(site, n = 41, cell = 60) {
     if (site.dem) { let sum = 0; for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) sum += site.dem.slope(la + a * dLat / 3, lo + b * dLon / 3); slope = Math.round(sum / 9 * 10) / 10; }
     info.push({ slope, risk: isNaN(slope) ? 0 : sFactor(slope), farm: !isNaN(slope), base: null });
   }
-  return { kind: 'live', n, cell, polys, info };
+  return { n, cell, polys, info };
 }
 
 /* ---------- UI build ---------- */
 function buildControls() {
   $('prioBox').innerHTML = PRIO.map(p => `<div class="ctl"><label for="${p.id}"><span>${L2(p.l)}</span><output id="o${p.id}">${$(p.id) ? $(p.id).value : p.v}</output></label><input id="${p.id}" type="range" min="0" max="5" value="${$(p.id) ? $(p.id).value : p.v}">${p.h ? `<p class="note">${L2(p.h)}</p>` : ''}</div>`).join('');
-  const bs = $('baseSel').value || '3';
+  const bs = $('baseSel').value || '0';
   $('baseSel').innerHTML = R.map((r, i) => `<option value="${i}"${String(i) === bs ? ' selected' : ''}>${r.id} · ${L2(r.name)}</option>`).join('');
   const prevInc = R.map((r, i) => $('inc' + i) ? $('inc' + i).value : Math.round(r.income * 10));
   $('incomeBox').innerHTML = R.map((r, i) => `<div class="ctl"><label for="inc${i}"><span>${r.id} · ${L2(r.name)}</span><output id="oInc${i}">${prevInc[i]}</output></label><input id="inc${i}" type="range" min="0" max="10" value="${prevInc[i]}"></div>`).join('');
   [...PRIO.map(p => p.id), ...R.map((_, i) => 'inc' + i)].forEach(id => $(id).addEventListener('input', update));
   const bb = [['esri', {th:'ภาพละเอียดสูง',en:'High-res imagery'}], ['osm', {th:'แผนที่ถนน',en:'Street map'}], ['blank', {th:'ไม่มี',en:'None'}]];
   $('baseBtns').innerHTML = bb.map(([k, l]) => `<button type="button" class="btn" data-base="${k}" aria-pressed="${k === curBase}">${L2(l)}</button>`).join('');
-  const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended plan'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['slope', {th:'ความลาดชัน',en:'Slope'}], ['kmeans', {th:'รูปแบบการปลูก (k-means)',en:'Cropping pattern (k-means)'}, 1], ['rules', {th:'รูปแบบ (กฎ)',en:'Pattern (rules)'}, 1], ['none', {th:'ไม่แสดง',en:'None'}]];
-  $('layerBtns').innerHTML = lb.map(([k, l, demoOnly]) => `<button type="button" class="btn" data-layer="${k}" aria-pressed="${k === mapMode}"${demoOnly && GRID && GRID.kind !== 'demo' ? ' disabled title="demo only"' : ''}>${L2(l)}</button>`).join('');
+  const lb = [['rec', {th:'แผนแนะนำ',en:'Recommended plan'}], ['erosion', {th:'เสี่ยงดินพัง',en:'Erosion risk'}], ['slope', {th:'ความลาดชัน',en:'Slope'}], ['none', {th:'ไม่แสดง',en:'None'}]];
+  $('layerBtns').innerHTML = lb.map(([k, l]) => `<button type="button" class="btn" data-layer="${k}" aria-pressed="${k === mapMode}">${L2(l)}</button>`).join('');
   $('satBtns').innerHTML = SAT.map(o => `<button type="button" class="btn" data-sat="${o.id}" aria-pressed="${o.id === curSat}">${L2(o.l)}</button>`).join('');
   document.querySelectorAll('[data-base]').forEach(b => b.onclick = () => setBase(b.dataset.base));
-  document.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { if (b.disabled) return; mapMode = b.dataset.layer; document.querySelectorAll('[data-layer]').forEach(x => x.setAttribute('aria-pressed', x.dataset.layer === mapMode)); paintCells(); });
+  document.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { mapMode = b.dataset.layer; document.querySelectorAll('[data-layer]').forEach(x => x.setAttribute('aria-pressed', x.dataset.layer === mapMode)); paintCells(); });
   document.querySelectorAll('[data-sat]').forEach(b => b.onclick = () => setSat(b.dataset.sat));
 }
 function setLang(l) {
   LANG = l; document.body.dataset.lang = l; document.documentElement.lang = l;
   try { localStorage.setItem('fs-lang', l); } catch (e) {}
   $('lTH').setAttribute('aria-pressed', l === 'th'); $('lEN').setAttribute('aria-pressed', l === 'en');
-  if (!S) return;
-  buildControls(); update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); satLegend();
+  buildControls(); satLegend();
+  if (!S) { if (!$('summary').dataset.err) $('summary').textContent = t('กำลังดึงข้อมูล NASA ของจุดเริ่มต้น…', 'Fetching NASA data for the starting point…'); return; }
+  renderAll();
   if (S.recentJSON) loadRecent(S);
-  if (MODE === 'live' && $('liveList').children.length) $('liveList').innerHTML = liveStatusHTML().replace(/data-state="wait"/g, 'data-state="ok"');
+  $('liveList').innerHTML = liveStatusHTML(); restoreStatus();
 }
+function renderAll() { update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); ndviNote(); }
 
 /* ---------- render ---------- */
 function update() {
+  if (!S) return;
   const st = readState();
   PRIO.forEach(p => $('o' + p.id).textContent = st.w[p.id]);
   R.forEach((r, i) => { const o = $('oInc' + i); if (o) o.textContent = Math.round(incomeOf(i) * 10); });
@@ -247,13 +219,13 @@ function update() {
       </dl>
       <details><summary>${t('เหตุผล หลักฐาน และความเสี่ยง', 'Reasons, evidence and risks')}</summary><dl>
         <dt>${t('ทำไมแนะนำ', 'Why suggested')}</dt><dd>${L2(r.why)}</dd>
-        <dt>${t('หลักฐาน', 'Evidence')}</dt><dd>${t('NASA POWER 25 ปี: ', 'NASA POWER, 25 years: ')}${t('น้ำที่ต้องเติมเฉลี่ย', 'mean irrigation need')} ${Math.round(e.defMean)} mm, ${t('ปีแล้ง', 'dry year')} ${Math.round(e.defP80)} mm${MODE === 'demo' ? ` · MODIS: ${t('พืชคลุมดินน้อยสุด มี.ค.–พ.ค.', 'lowest cover Mar–May')}` : ''} · ${t('ดิน', 'soil')} pH ${S.soil.ph}, OM ~${S.soil.om}%${S.soilFallback ? t(' (ค่าดินของพื้นที่เดโม เพราะดึงข้อมูลดินจุดนี้ไม่ได้)', ' (demo-area soil; live soil unavailable)') : ''}</dd>
+        <dt>${t('หลักฐาน', 'Evidence')}</dt><dd>${t('NASA POWER 25 ปี: ', 'NASA POWER, 25 years: ')}${t('น้ำที่ต้องเติมเฉลี่ย', 'mean irrigation need')} ${Math.round(e.defMean)} mm, ${t('ปีแล้ง', 'dry year')} ${Math.round(e.defP80)} mm${S.ndvi ? ` · MODIS: ${L2(RNAME[S.ndvi.cls])}, ${t('พืชคลุมดินน้อยสุด', 'lowest cover')} ${S.ndvi.lowMonths.map(m => MTH[LANG][m]).join('–')}` : ''} · ${t('ดิน', 'soil')} pH ${S.soil.ph}, OM ~${S.soil.om}%${S.soilFallback ? t(' (ค่าสมมติ เพราะไม่มีข้อมูลดินที่จุดนี้)', ' (assumed values; no soil data at this point)') : ''}</dd>
         <dt>${t('ประโยชน์', 'Benefits')}</dt><dd>${L2(r.benefit)}</dd>
         <dt>${t('อาหารสัตว์', 'Forage')}</dt><dd>${L2(r.forage)}</dd>
         <dt>${t('ข้อมูลที่ยังขาด', 'Information gaps')}</dt><dd>${L2(r.gap)}</dd>
         <dt>${t('ความเสี่ยงที่ต้องตรวจในพื้นที่', 'Risks to check locally')}</dt><dd>${L2(r.risk)}</dd>
       </dl></details>
-      <span class="conf">${t('ความมั่นใจ', 'Confidence')}: ${i === b0 ? t('กลาง', 'medium') : t('กลาง–ต่ำ', 'medium–low')} · ${t('ภูมิอากาศ ~50 km · ดิน 250 m (ไม่ใช่ผลตรวจดินในแปลง) · รายได้ตั้งเอง', 'climate ~50 km · soil 250 m (not a field test) · income user-set')}${MODE === 'live' ? t(' · แผน 5 แบบเป็นตัวอย่างจากพื้นที่เดโม ยังไม่ได้คัดตามพืชของจุดนี้', ' · these 5 rotations are demo-area examples, not yet screened for this point') : ''}</span>
+      <span class="conf">${t('ความมั่นใจ', 'Confidence')}: ${i === b0 ? t('กลาง', 'medium') : t('กลาง–ต่ำ', 'medium–low')} · ${t('ภูมิอากาศ ~50 km · ดิน 250 m (ไม่ใช่ผลตรวจดินในแปลง) · รายได้ตั้งเอง', 'climate ~50 km · soil 250 m (not a field test) · income user-set')}${t(' · แผน 5 แบบเป็นชุดตั้งต้นสำหรับพืชไร่เขตร้อน ยังไม่ได้คัดพืชตามจุดนี้', ' · the 5 rotations are a starter set for tropical field crops, not yet screened for this point')}</span>
     </article>`;
   }).join('');
   const bb = R[best], eb = ev[best];
@@ -267,19 +239,21 @@ function update() {
 
 /* ---------- map ---------- */
 /* NASA GIBS overlays (daily global imagery, no login) + SoilGrids WMS. `levels` = candidate tile-matrix levels; the first that loads is kept. */
+const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi';
+/* lag = days the product usually trails real time; level = GIBS tile-matrix level (checked against WMTS capabilities, Nov 2026) */
 const SAT = [
   { id: 'none', l: { th: 'ไม่แสดง', en: 'None' } },
-  { id: 'truecolor', gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor', levels: [9], fmt: 'jpg', res: '250 m', src: 'NASA MODIS Terra', l: { th: 'ภาพสีจริง', en: 'True colour' },
-    key: { th: 'ภาพถ่ายจริงวันที่เลือก (หน้าฝนมักมีเมฆ)', en: 'Actual image on the chosen day (often cloudy in the rainy season)' } },
-  { id: 'ndvi', gibs: 'MODIS_Terra_NDVI_8Day', levels: [9, 8], fmt: 'png', res: '250 m', src: 'NASA MODIS Terra NDVI 8-day', l: { th: 'พืชพรรณ NDVI', en: 'Vegetation NDVI' },
+  { id: 'truecolor', gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor', level: 9, fmt: 'jpg', lag: 1, res: '250 m', src: 'NASA MODIS Terra', l: { th: 'ภาพสีจริง', en: 'True colour' },
+    key: { th: 'ภาพถ่ายจริงของวันนั้น (หน้าฝนมักมีเมฆ)', en: 'Actual image for that day (often cloudy in the rainy season)' } },
+  { id: 'ndvi', gibs: 'MODIS_Terra_NDVI_8Day', level: 9, fmt: 'png', lag: 3, res: '250 m', src: 'NASA MODIS Terra NDVI 8-day', l: { th: 'พืชพรรณ NDVI', en: 'Vegetation NDVI' },
     grad: ['#a9805a', '#e6d27a', '#9cc95a', '#2f8a3a', '#0d4f22'], lo: { th: 'ดินโล่ง', en: 'bare' }, hi: { th: 'พืชหนาแน่น', en: 'dense' } },
-  { id: 'lst', gibs: 'MODIS_Terra_Land_Surface_Temp_Day', levels: [7, 6], fmt: 'png', res: '1 km', src: 'NASA MODIS Terra LST (day)', l: { th: 'อุณหภูมิพื้นผิว', en: 'Land surface temp.' },
+  { id: 'lst', gibs: 'MODIS_Terra_Land_Surface_Temp_Day', level: 7, fmt: 'png', lag: 2, res: '1 km', src: 'NASA MODIS Terra LST (day)', l: { th: 'อุณหภูมิพื้นผิว', en: 'Land surface temp.' },
     grad: ['#3b4cc0', '#7aa6f7', '#f2e6a0', '#f08a4b', '#b40426'], lo: { th: 'เย็น', en: 'cool' }, hi: { th: 'ร้อน', en: 'hot' } },
-  { id: 'smap', gibs: 'SMAP_L4_Analyzed_Root_Zone_Soil_Moisture', levels: [6, 7, 5], fmt: 'png', res: '9 km', src: 'NASA SMAP L4 root zone', l: { th: 'ความชื้นดิน', en: 'Soil moisture' },
+  { id: 'smap', gibs: 'SMAP_L4_Analyzed_Root_Zone_Soil_Moisture', level: 6, fmt: 'png', lag: 5, res: '9 km', src: 'NASA SMAP L4 root zone', l: { th: 'ความชื้นดิน', en: 'Soil moisture' },
     grad: ['#a0522d', '#e8c27a', '#cfe8c0', '#5fa8d3', '#1d3f8f'], lo: { th: 'แห้ง', en: 'dry' }, hi: { th: 'ชื้น', en: 'wet' } },
-  { id: 'imerg', gibs: 'IMERG_Precipitation_Rate', levels: [6, 7, 5], fmt: 'png', res: '10 km', src: 'NASA GPM IMERG', time: d => d + 'T12:00:00Z', l: { th: 'ฝน (รายครึ่งชม.)', en: 'Rain rate' },
+  { id: 'imerg', gibs: 'IMERG_Precipitation_Rate', level: 6, fmt: 'png', lag: 2, res: '10 km', src: 'NASA GPM IMERG (daily)', l: { th: 'ฝน', en: 'Rain' },
     grad: ['#a6e3f5', '#3fa0d6', '#2b56c4', '#c43dc4', '#e8333a'], lo: { th: 'น้อย', en: 'light' }, hi: { th: 'หนัก', en: 'heavy' } },
-  { id: 'fire', gibs: 'VIIRS_SNPP_Thermal_Anomalies_375m_All', levels: [9, 8, 7, 6], fmt: 'png', res: '375 m', src: 'NASA VIIRS active fires', l: { th: 'ไฟ / การเผา', en: 'Fires / burning' },
+  { id: 'fire', gwms: 'VIIRS_NOAA20_Thermal_Anomalies_375m_All', lag: 1, res: '375 m', src: 'NASA VIIRS (NOAA-20) active fires', l: { th: 'ไฟ / การเผา', en: 'Fires / burning' },
     key: { th: 'จุดแดง = ตรวจพบความร้อนผิดปกติ (ไฟหรือการเผาตอซัง)', en: 'Red dots = thermal anomalies (fires or stubble burning)' } },
   { id: 'soil_ph', wms: 'https://maps.isric.org/mapserv?map=/map/phh2o.map', layer: 'phh2o_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'pH ดิน', en: 'Soil pH' },
     grad: ['#d7191c', '#fdae61', '#ffffbf', '#abd9e9', '#2c7bb6'], lo: { th: 'กรด', en: 'acid' }, hi: { th: 'ด่าง', en: 'alkaline' } },
@@ -288,68 +262,75 @@ const SAT = [
   { id: 'soil_clay', wms: 'https://maps.isric.org/mapserv?map=/map/clay.map', layer: 'clay_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'ดินเหนียว %', en: 'Clay %' },
     grad: ['#fff7bc', '#fec44f', '#ec7014', '#993404', '#4d1a02'], lo: { th: 'น้อย', en: 'low' }, hi: { th: 'มาก', en: 'high' } }
 ];
-let curSat = 'none', satLayer = null, satLevelIdx = 0, satErr = 0;
-const gibsDate = () => $('gibsDate').value;
+let curSat = 'none', satLayer = null, satBack = 0, satErr = 0;
+const isoDay = ms => new Date(ms).toISOString().slice(0, 10);
+/* The date actually requested: the chosen day, capped at (today − product lag), then stepped back if tiles are missing */
+function satDate(o) {
+  const chosen = Date.parse($('gibsDate').value + 'T00:00:00Z'), cap = Date.now() - (o.lag || 0) * 864e5;
+  return isoDay(Math.min(chosen, cap) - satBack * 864e5);
+}
 function makeSat(o) {
-  if (o.wms) return L.tileLayer.wms(o.wms, { layers: o.layer, format: 'image/png', transparent: true, pane: 'sat', opacity: +$('satOpac').value / 100, attribution: o.src });
-  const lv = o.levels[Math.min(satLevelIdx, o.levels.length - 1)], tm = (o.time || (d => d))(gibsDate());
-  return L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${o.gibs}/default/${tm}/GoogleMapsCompatible_Level${lv}/{z}/{y}/{x}.${o.fmt}`,
-    { maxNativeZoom: lv, maxZoom: 18, pane: 'sat', opacity: +$('satOpac').value / 100, attribution: 'NASA GIBS / ' + o.src });
+  const op = +$('satOpac').value / 100;
+  if (o.wms) return L.tileLayer.wms(o.wms, { layers: o.layer, format: 'image/png', transparent: true, pane: 'sat', opacity: op, attribution: o.src });
+  if (o.gwms) return L.tileLayer.wms(GIBS_WMS, { layers: o.gwms, format: 'image/png', transparent: true, version: '1.3.0', time: satDate(o), pane: 'sat', opacity: op, attribution: 'NASA GIBS / ' + o.src });
+  return L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${o.gibs}/default/${satDate(o)}/GoogleMapsCompatible_Level${o.level}/{z}/{y}/{x}.${o.fmt}`,
+    { maxNativeZoom: o.level, maxZoom: 18, pane: 'sat', opacity: op, attribution: 'NASA GIBS / ' + o.src });
 }
 function setSat(id) {
-  curSat = id; satLevelIdx = 0; satErr = 0;
+  curSat = id; satBack = 0; satErr = 0;
   document.querySelectorAll('[data-sat]').forEach(b => b.setAttribute('aria-pressed', b.dataset.sat === id));
-  drawSat(); satLegend();
+  drawSat();
 }
 function drawSat() {
   if (!map) return;
   if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
   const o = SAT.find(x => x.id === curSat); $('satMsg').textContent = '';
-  $('dateBox').hidden = !o || !o.gibs;
+  $('dateBox').hidden = !o || !(o.gibs || o.gwms);
+  satLegend();
   if (!o || o.id === 'none') return;
-  satLayer = makeSat(o).addTo(map);
+  const layer = satLayer = makeSat(o).addTo(map);
   let ok = 0;
-  satLayer.on('tileload', () => { ok++; });
-  satLayer.on('tileerror', () => {
+  layer.on('tileload', () => { ok++; });
+  layer.on('tileerror', () => {
+    if (layer !== satLayer) return;
     satErr++;
-    if (satErr === 4 && !ok && o.gibs && satLevelIdx < o.levels.length - 1) { satLevelIdx++; satErr = 0; drawSat(); }
-    else if (satErr === 6 && !ok) $('satMsg').textContent = t('ไม่มีภาพของวันที่นี้ ลองเลือกวันอื่น', 'No image for this date; try another day');
+    if (satErr >= 3 && !ok && o.gibs && satBack < 6) { satBack++; satErr = 0; drawSat(); }
+    else if (satErr >= 3 && !ok) $('satMsg').textContent = o.wms ? t('โหลดชั้นข้อมูลนี้ไม่ได้ในตอนนี้', 'This layer cannot be loaded right now') : t('ไม่มีภาพช่วงวันที่นี้ ลองเลือกวันอื่น', 'No image around this date; try another day');
   });
 }
 function satLegend() {
   const o = SAT.find(x => x.id === curSat); let h = '';
   if (o && o.id !== 'none') {
     h = o.grad ? `<div style="height:10px;border-radius:5px;background:linear-gradient(90deg,${o.grad.join(',')})"></div><div class="row" style="justify-content:space-between;font-size:.75rem;color:var(--muted)"><span>${L2(o.lo)}</span><span>${L2(o.hi)}</span></div>` : `<p class="note">${L2(o.key)}</p>`;
-    h += `<p class="note">${o.src} · ${o.res}${o.grad ? t(' · สีโดยประมาณ ดูสเกลเต็มใน Worldview', ' · approximate colours; full scale in Worldview') : ''}</p>`;
+    const dated = (o.gibs || o.gwms) && $('gibsDate').value ? ` · ${t('ภาพวันที่', 'image date')} ${satDate(o)}` : '';
+    h += `<p class="note">${o.src} · ${o.res}${dated}${o.grad ? (o.gibs ? t(' · สีโดยประมาณ ดูสเกลเต็มใน Worldview', ' · approximate colours; full scale in Worldview') : t(' · สีโดยประมาณ', ' · approximate colours')) : ''}</p>`;
   }
   $('satLegend').innerHTML = h;
 }
 function initMap() {
   if (!window.L) { $('map').innerHTML = `<p style="padding:16px">${t('โหลดแผนที่ไม่ได้', 'Map library failed to load')}</p>`; return; }
-  map = L.map('map', { preferCanvas: true, scrollWheelZoom: false, worldCopyJump: true }).setView([DEMO.lat, DEMO.lon], 13);
+  map = L.map('map', { preferCanvas: true, scrollWheelZoom: false, worldCopyJump: true }).setView(DEFAULT_POINT, 12);
   map.createPane('sat').style.zIndex = 350;
   const onErr = () => { tileErrors++; if (tileErrors > 6) { $('tileMsg').hidden = false; $('tileMsg').textContent = t('โหลดภาพพื้นหลังไม่ได้ในหน้านี้ (ใช้ได้เมื่อเปิดผ่าน GitHub Pages)', 'Base-map tiles cannot load in this viewer (they work on the hosted site)'); } };
   baseLayers.esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' }).on('tileerror', onErr);
   baseLayers.osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).on('tileerror', onErr);
   baseLayers.blank = L.layerGroup();
   baseLayers[curBase].addTo(map);
-  const d = new Date(Date.now() - 3 * 864e5); $('gibsDate').value = d.toISOString().slice(0, 10);
+  $('gibsDate').value = isoDay(Date.now() - 864e5);
   $('gibsDate').max = new Date().toISOString().slice(0, 10);
-  $('gibsDate').addEventListener('change', () => { satLevelIdx = 0; satErr = 0; drawSat(); links(); });
+  $('gibsDate').addEventListener('change', () => { satBack = 0; satErr = 0; drawSat(); if (S) links(); });
   $('satOpac').addEventListener('input', () => { $('oSatOpac').textContent = $('satOpac').value + '%'; if (satLayer) satLayer.setOpacity(+$('satOpac').value / 100); });
   map.on('click', onMapClick);
-  setGrid(demoGrid());
 }
 function setGrid(grid) {
   GRID = grid;
   if (cellLayer) map.removeLayer(cellLayer);
   cellLayer = L.layerGroup().addTo(map);
-  cells = grid.polys.map((ll, p) => { const pl = L.polygon(ll, { weight: grid.kind === 'live' ? 0.2 : 0.3, color: '#ffffff', fillOpacity: .7, bubblingMouseEvents: false }); pl.on('click', e => cellPopup(p, e.latlng)); pl.addTo(cellLayer); return pl; });
+  cells = grid.polys.map((ll, p) => { const pl = L.polygon(ll, { weight: 0.2, color: '#ffffff', fillOpacity: .7, bubblingMouseEvents: false }); pl.on('click', e => cellPopup(p, e.latlng)); pl.addTo(cellLayer); return pl; });
   const all = grid.info.filter(x => x.farm).map(x => x.risk);
   riskBreaks = all.length ? [0.2, 0.4, 0.6, 0.8].map(q => pct(all, q)) : [0, 0, 0, 0];
-  if (grid.kind !== 'demo' && (mapMode === 'kmeans' || mapMode === 'rules')) mapMode = 'rec';
   recCache.key = '';
-  buildControls(); paintCells();
+  paintCells();
 }
 function setBase(k) {
   if (map) { map.removeLayer(baseLayers[curBase]); baseLayers[k].addTo(map); if (baseLayers[k].bringToBack) baseLayers[k].bringToBack(); }
@@ -358,7 +339,7 @@ function setBase(k) {
 }
 let recCache = { key: '', best: [] };
 function recFor(st) {
-  const key = JSON.stringify(st) + R.map((_, i) => incomeOf(i)).join() + S.lat + ',' + S.lon + GRID.kind;
+  const key = JSON.stringify(st) + R.map((_, i) => incomeOf(i)).join() + S.lat + ',' + S.lon;
   if (recCache.key === key) return recCache.best;
   const memo = {}; const sMed = sFactor(3);
   const best = cells.map((_, p) => {
@@ -372,14 +353,12 @@ function recFor(st) {
 }
 const SLOPE_BRK = [2, 5, 8, 12], SLOPE_COL = ['#e8f1d8', '#b9d98a', '#e2c044', '#e08a3c', '#a83a1e'];
 function paintCells() {
-  if (!map || !GRID) { if (GRID) legend(); return; }
+  if (!map || !GRID || !S) return;
   const op = +$('opac').value / 100; $('oOpac').textContent = Math.round(op * 100) + '%';
   const st = readState(); const rec = mapMode === 'rec' ? recFor(st) : null;
   cells.forEach((pl, p) => {
     const ci = cellInfo(p); let col = null;
-    if (mapMode === 'kmeans' && GRID.kind === 'demo') col = KCOL[ci.k];
-    else if (mapMode === 'rules' && GRID.kind === 'demo') col = RCOL[ci.rule];
-    else if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
+    if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
     else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
     else if (mapMode === 'rec') col = rec[p] >= 0 ? PLAN_COL[rec[p]] : null;
     pl.setStyle(col ? { fillColor: col, fillOpacity: op, opacity: op > 0 ? .35 : 0 } : { fillOpacity: mapMode === 'none' ? 0 : op * .25, fillColor: '#888888', opacity: 0 });
@@ -388,25 +367,22 @@ function paintCells() {
 }
 function legend(rec) {
   const n = GRID.info.length; const count = f => { let c = 0; for (let p = 0; p < n; p++) if (f(p)) c++; return Math.round(c / n * 100) + '%'; };
-  const gridNote = GRID.kind === 'live' ? t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`) : t(`กริด MODIS ${GRID.n}×${GRID.cols} ช่องละ 231 m จัดให้ตรงแนวเหนือ–ใต้ (พื้นที่ตัวอย่าง)`, `MODIS grid ${GRID.n}×${GRID.cols}, 231 m cells, resampled north-up (example area)`);
+  const gridNote = t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`);
   let h = '';
-  if (mapMode === 'kmeans') h = KNAME.map((nm, i) => `<span><i style="background:${KCOL[i]}"></i>${L2(nm)}<b>${count(p => cellInfo(p).k === i)}</b></span>`).join('');
-  else if (mapMode === 'rules') h = RNAME.map((nm, i) => `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${count(p => cellInfo(p).rule === i)}</b></span>`).join('');
-  else if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${GRID.kind === 'demo' ? t('ความลาดชัน (SRTM) × พืชคลุมดินช่วง มี.ค.–พ.ค. (MODIS) จัด 5 ระดับเทียบกันในพื้นที่', 'Slope (SRTM) × Mar–May ground cover (MODIS), local quintiles') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM), quintiles within the grid')}</p>`;
+  if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM), quintiles within the grid')}</p>`;
   else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
-  else if (mapMode === 'rec' && rec) h = R.map((r, i) => `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่ใช่พื้นที่เกษตร / ไม่มีข้อมูล', 'Not farmland / no data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
+  else if (mapMode === 'rec' && rec) h = R.map((r, i) => `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
   $('legend').innerHTML = h + `<p class="note">${gridNote}</p>`;
 }
 function cellPopup(p, ll) {
   const ci = cellInfo(p), st = readState();
   const lvl = [t('ต่ำมาก', 'very low'), t('ต่ำ', 'low'), t('ปานกลาง', 'medium'), t('สูง', 'high'), t('สูงมาก', 'very high')][riskBreaks.filter(b => ci.risk > b).length];
   let h = `<b>${fmtLL(ll.lat, ll.lng)}</b><br>`;
-  if (GRID.kind === 'demo') h += `${L2(KNAME[ci.k])}<br>${t('รูปแบบตามกฎ', 'Rule class')}: ${L2(RNAME[ci.rule])}<br>`;
   h += `${t('ความลาดชัน', 'Slope')}: ${isNaN(ci.slope) ? '—' : ci.slope + '%'}`;
   if (ci.farm) {
-    const rec = recFor(st)[p], base = GRID.kind === 'demo' ? ci.base : st.base;
+    const rec = recFor(st)[p], base = st.base;
     h += `<br>${t('เสี่ยงดินพัง', 'Erosion risk')}: ${lvl}<br>${t('แผนปัจจุบัน', 'Current')}: ${R[base].id} · ${L2(R[base].name)}<br><b>${t('แนะนำ', 'Suggested')}: ${R[rec].id} · ${L2(R[rec].name)}</b>`;
-  } else h += `<br>${t('ไม่ใช่พื้นที่เกษตร ไม่แนะนำแผน', 'Not farmland; no suggestion')}`;
+  } else h += `<br>${t('ไม่มีข้อมูลความสูงของช่องนี้', 'No elevation data for this cell')}`;
   L.popup().setLatLng(ll).setContent(h).openOn(map);
 }
 function links() {
@@ -427,18 +403,15 @@ function drawCharts() {
     { type: 'line', label: 'ET₀ (mm)', data: S.clim.map(c => c[1]), borderColor: css('--heat'), backgroundColor: css('--heat'), tension: .3, pointRadius: 2, yAxisID: 'y' },
     { type: 'line', label: t('วัน ≥35 °C', 'Days ≥35 °C'), data: S.clim.map(c => c[3]), borderColor: css('--warn'), backgroundColor: css('--warn'), borderDash: [4, 3], pointRadius: 2, yAxisID: 'y2' }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true, title: { display: true, text: t('mm/เดือน', 'mm/month') } }, y2: { position: 'right', beginAtZero: true, max: 31, grid: { display: false } } }, plugins: lg } });
-  const sl = DEMO.ndviSeries.map((_, i) => { const y = 2022 + Math.floor(i / 23), k = i % 23; return MTH[LANG][Math.min(11, Math.floor((k * 16 + 8) / 365.25 * 12))] + ' ' + String(y).slice(2); });
-  charts.ndvi = new Chart($('cNdvi'), { type: 'line', data: { labels: sl, datasets: [
-    { label: t('NDVI พื้นที่เกษตร', 'Cropland NDVI'), data: DEMO.ndviSeries, borderColor: css('--crop'), backgroundColor: css('--crop'), tension: .3, pointRadius: 0 },
-    { label: t('เกณฑ์ดินโล่ง 0.3', 'Bare-soil threshold 0.3'), data: DEMO.ndviSeries.map(() => .3), borderColor: css('--soil'), borderDash: [5, 4], pointRadius: 0 }] },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { min: 0, max: .9 }, x: { ticks: { maxTicksLimit: 9 } } }, plugins: lg } });
+  if (S.ndvi) charts.ndvi = new Chart($('cNdvi'), { type: 'line', data: { labels: S.ndvi.dates.map(d => `${+d.slice(8, 10)} ${MTH[LANG][+d.slice(5, 7) - 1]} ${d.slice(2, 4)}`), datasets: [
+    { label: t('NDVI ของ pixel นี้', 'NDVI at this pixel'), data: S.ndvi.smooth, borderColor: css('--crop'), backgroundColor: css('--crop'), tension: .3, pointRadius: 0, borderWidth: 2.5 },
+    { label: t('ค่าดิบ (ผ่านการกรองเมฆ)', 'Raw (cloud-screened)'), data: S.ndvi.raw, borderColor: 'transparent', backgroundColor: css('--muted'), pointRadius: 3, showLine: false },
+    { label: t('เกณฑ์ดินโล่ง 0.3', 'Bare-soil threshold 0.3'), data: S.ndvi.dates.map(() => .3), borderColor: css('--soil'), borderDash: [5, 4], pointRadius: 0 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { min: 0, max: 1 }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: lg } });
   charts.trend = new Chart($('cTrend'), { data: { labels: S.annual.map(a => a[0]), datasets: [
     { type: 'bar', label: t('ฝนรายปี (mm)', 'Annual rain (mm)'), data: S.annual.map(a => a[1]), backgroundColor: css('--water'), yAxisID: 'y' },
     { type: 'line', label: t('วัน ≥35 °C', 'Days ≥35 °C'), data: S.annual.map(a => a[3]), borderColor: css('--heat'), backgroundColor: css('--heat'), pointRadius: 2, yAxisID: 'y2' }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, y2: { position: 'right', beginAtZero: true, grid: { display: false } } }, plugins: lg } });
-  const pl = Array.from({ length: 23 }, (_, k) => MTH[LANG][Math.min(11, Math.floor((k * 16 + 8) / 365.25 * 12))]);
-  charts.prof = new Chart($('cProf'), { type: 'line', data: { labels: pl, datasets: DEMO.kmeans.profiles.map((p, i) => ({ label: L2(KNAME[i]), data: p, borderColor: KCOL[i], backgroundColor: KCOL[i], pointRadius: 0, tension: .3, borderWidth: 2 })) },
-    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { min: .3, max: .8 }, x: { ticks: { maxTicksLimit: 12 } } }, plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } } } } });
 }
 function sen(xs, ys) { const s = []; for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) s.push((ys[j] - ys[i]) / (xs[j] - xs[i])); return pct(s, .5); }
 function erfc(x) { const z = 1 / (1 + .5 * x); return z * Math.exp(-x * x - 1.26551223 + z * (1.00002368 + z * (.37409196 + z * (.09678418 + z * (-.18628806 + z * (.27886807 + z * (-1.13520398 + z * (1.48851587 + z * (-.82215223 + z * .17087277))))))))); }
@@ -450,7 +423,7 @@ function trends() {
     return `<div>${n}<b>${s >= 0 ? '+' : ''}${s.toFixed(dp)} ${u}</b><span class="pill ${p < .05 ? 'sig' : 'ns'}">p=${p.toFixed(2)} ${p < .05 ? t('มีนัยสำคัญ', 'significant') : t('ไม่ชัด', 'not significant')}</span></div>`; }).join('');
 }
 function soilTiles() {
-  const sl = MODE === 'demo' ? DEMO.slope.flat() : (S.slopeSamples || []); const s = S.soil;
+  const sl = S.slopeSamples || []; const s = S.soil;
   const tex = s.clay >= 40 ? t('ดินเหนียว', 'clay') : s.clay >= 27 ? t('ดินร่วนเหนียว', 'clay loam') : s.sand >= 70 ? t('ดินทราย / ร่วนปนทราย', 'sand / loamy sand') : s.sand >= 50 ? t('ดินร่วนปนทราย', 'sandy loam') : t('ดินร่วน', 'loam');
   const phNote = s.ph < 5.5 ? t('เป็นกรด พืชตระกูลถั่วหลายชนิดไม่ชอบ', 'acidic; many legumes dislike it') : s.ph > 7.8 ? t('เป็นด่าง', 'alkaline') : t('อยู่ในช่วงที่พืชส่วนใหญ่ปลูกได้', 'suits most crops');
   const omNote = s.om < 1.5 ? t('ต่ำ ควรเพิ่มอินทรียวัตถุ', 'low; worth building up') : s.om < 3 ? t('ปานกลาง', 'moderate') : t('ดี', 'good');
@@ -460,8 +433,8 @@ function soilTiles() {
     [t('อินทรียวัตถุ 0–30 cm', 'Organic matter 0–30 cm'), '~' + s.om + '%', omNote],
     [t('น้ำที่พืชใช้ได้ 0–100 cm', 'Plant-available water 0–100 cm'), s.paw + ' mm', t(`ชั้นล่าง >45 cm ~${s.deepStore} mm`, `below 45 cm ~${s.deepStore} mm`)]
   ];
-  if (sl.length) rows.push([t('ความลาดชัน (มัธยฐาน)', 'Slope (median)'), pct(sl, .5).toFixed(0) + '%', MODE === 'demo' ? t(`90% ของพื้นที่ ≤ ${pct(sl, .9).toFixed(0)}%`, `90% of cells ≤ ${pct(sl, .9).toFixed(0)}%`) : t(`ในรัศมี ~125 m · สูงสุด ${Math.max(...sl).toFixed(0)}%`, `within ~125 m · max ${Math.max(...sl).toFixed(0)}%`)]);
-  $('soilTiles').innerHTML = rows.map(([a, b, c]) => `<div>${a}<b>${b}</b>${c}</div>`).join('') + (S.soilFallback ? `<div>${t('หมายเหตุ', 'Note')}<b class="d">${t('ใช้ค่าดินพื้นที่เดโม', 'Demo-area soil used')}</b>${t('ดึง SoilGrids ของจุดนี้ไม่ได้ (เช่น เป็นน้ำหรือเมือง)', 'SoilGrids had no value here (e.g. water or urban)')}</div>` : '');
+  if (sl.length) rows.push([t('ความลาดชัน (มัธยฐาน)', 'Slope (median)'), pct(sl, .5).toFixed(0) + '%', t(`ในรัศมี ~125 m · สูงสุด ${Math.max(...sl).toFixed(0)}%`, `within ~125 m · max ${Math.max(...sl).toFixed(0)}%`)]);
+  $('soilTiles').innerHTML = rows.map(([a, b, c]) => `<div>${a}<b>${b}</b>${c}</div>`).join('') + (S.soilFallback ? `<div>${t('หมายเหตุ', 'Note')}<b class="d">${t('ค่าดินเป็นค่าสมมติ', 'Soil values are assumed')}</b>${t('SoilGrids ไม่มีค่าที่จุดนี้ (เช่น เป็นน้ำหรือเมือง) จึงใช้ค่ากลางๆ แทน ควรตรวจดินจริง', 'SoilGrids has no value here (e.g. water or urban), so mid-range values are used; test the soil')}</div>` : '');
 }
 
 /* ---------- live NASA data (T1, T2) ---------- */
@@ -535,14 +508,17 @@ async function demSampler(lat, lon) {
   for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) samples.push(slope(lat + a * dLat, lon + b * dLon));
   return { slope, samples };
 }
+const sMsg = m => typeof m === 'function' ? m() : (m || '');
+/* msg may be a function so the text follows the language toggle */
 function setStatus(id, state, msg) {
+  statusMem[id] = [state, msg];
   const el = $('st-' + id); if (!el) return;
-  el.dataset.state = state; el.querySelector('em').textContent = msg || '';
+  el.dataset.state = state; el.querySelector('em').textContent = sMsg(msg);
 }
-function liveStatusHTML() {
-  const rows = [['power', t('NASA POWER ภูมิอากาศ 2001–2025', 'NASA POWER climate 2001–2025')], ['recent', t('NASA POWER 90 วันล่าสุด', 'NASA POWER last 90 days')], ['soil', t('ดิน (SoilGrids)', 'Soil (SoilGrids)')], ['slope', t('ความลาดชัน (SRTM)', 'Slope (SRTM)')]];
-  return rows.map(([k, l]) => `<li id="st-${k}" data-state="wait"><i></i>${l}<em></em></li>`).join('');
-}
+const STATUS_ROWS = () => [['power', t('NASA POWER ภูมิอากาศ 2001–2025', 'NASA POWER climate 2001–2025')], ['recent', t('NASA POWER 90 วันล่าสุด', 'NASA POWER last 90 days')], ['soil', t('ดิน (SoilGrids)', 'Soil (SoilGrids)')], ['slope', t('ความลาดชัน (SRTM)', 'Slope (SRTM)')], ['ndvi', t('NDVI 1 ปีล่าสุด (MODIS)', 'NDVI, last year (MODIS)')]];
+const statusMem = {};
+function liveStatusHTML() { return STATUS_ROWS().map(([k, l]) => `<li id="st-${k}" data-state="wait"><i></i>${l}<em></em></li>`).join(''); }
+function restoreStatus() { for (const k in statusMem) { const el = $('st-' + k); if (el) { el.dataset.state = statusMem[k][0]; el.querySelector('em').textContent = sMsg(statusMem[k][1]); } } }
 const fmtLat = v => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'N' : 'S'}`;
 const fmtLon = v => `${Math.abs(v).toFixed(3)}°${v >= 0 ? 'E' : 'W'}`;
 const fmtLL = (la, lo) => `${fmtLat(la)} ${fmtLon(lo)}`;
@@ -551,17 +527,19 @@ function onMapClick(e) {
   const box = document.createElement('div');
   const head = document.createElement('b'); head.textContent = fmtLL(lat, lng);
   const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.style.marginTop = '6px'; btn.style.display = 'block';
-  btn.textContent = t('วิเคราะห์จุดนี้ด้วยข้อมูล NASA สด', 'Analyse this point with live NASA data');
+  btn.textContent = t('วิเคราะห์จุดนี้', 'Analyse this point');
   L.DomEvent.on(btn, 'click', ev => { L.DomEvent.stop(ev); map.closePopup(); loadLive(lat, lng); });
   box.append(head, btn);
   L.popup().setLatLng(e.latlng).setContent(box).openOn(map);
 }
 async function loadLive(lat, lon) {
   lon = ((lon + 540) % 360) - 180;
-  const key = lat.toFixed(2) + ',' + lon.toFixed(2);
-  $('liveBox').hidden = false; $('liveList').innerHTML = liveStatusHTML();
-  $('liveTitle').textContent = t('กำลังโหลดข้อมูล NASA สด…', 'Loading live NASA data…');
+  const seq = ++loadSeq, key = lat.toFixed(3) + ',' + lon.toFixed(3);
+  for (const k in statusMem) delete statusMem[k];
+  $('liveList').innerHTML = liveStatusHTML(); $('retryBtn').hidden = true;
+  $('liveTitle').textContent = t(`กำลังดึงข้อมูลของ ${fmtLL(lat, lon)}…`, `Fetching data for ${fmtLL(lat, lon)}…`);
   try { history.replaceState(null, '', '#p=' + lat.toFixed(4) + ',' + lon.toFixed(4)); } catch (e) {}
+  if (map) { if (liveMarker) liveMarker.setLatLng([lat, lon]); else liveMarker = L.circleMarker([lat, lon], { radius: 7, color: '#ffffff', weight: 3, fillColor: '#c4512b', fillOpacity: 1, interactive: false }).addTo(map); map.setView([lat, lon], Math.max(map.getZoom(), 14)); }
   let site = liveCache.get(key);
   if (!site) {
     ['power', 'soil', 'slope'].forEach(k => setStatus(k, 'load', '…'));
@@ -570,53 +548,93 @@ async function loadLive(lat, lon) {
       getJSON(`https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon.toFixed(4)}&lat=${lat.toFixed(4)}&property=phh2o&property=soc&property=clay&property=sand&depth=0-5cm&depth=5-15cm&depth=15-30cm&depth=30-60cm&depth=60-100cm&value=mean`, 30000),
       demSampler(lat, lon)
     ]);
-    if (pw.status !== 'fulfilled') {
-      setStatus('power', 'err', t('ดึงไม่ได้ ใช้พื้นที่เดโมต่อ', 'failed; staying on demo area'));
-      $('liveTitle').textContent = t('โหลดข้อมูลสดไม่ได้', 'Live data failed'); return;
+    if (seq !== loadSeq) return;
+    let cl = null;
+    if (pw.status === 'fulfilled') { try { cl = buildClimate(pw.value.properties.parameter, lat); } catch (e) {} }
+    if (!cl || cl.days.length < 3650) {
+      setStatus('power', 'err', () => t('ดึงไม่ได้', 'failed')); ['soil', 'slope'].forEach(k => setStatus(k, 'wait', ''));
+      $('liveTitle').textContent = t('ดึงข้อมูลภูมิอากาศจาก NASA POWER ไม่ได้ (อาจเป็นจุดในทะเล หรือเซิร์ฟเวอร์ไม่ตอบ)', 'Could not get climate from NASA POWER (ocean point, or the server did not answer)');
+      $('retryBtn').hidden = false; $('retryBtn').onclick = () => loadLive(lat, lon);
+      if (!S) { $('summary').dataset.err = '1'; $('summary').textContent = t('ยังไม่มีข้อมูล: ดึง NASA POWER ไม่ได้ กด "ลองใหม่" ในแผงแผนที่ หรือเลือกจุดอื่น', 'No data yet: NASA POWER did not respond. Press "Retry" in the map panel or pick another point.'); }
+      return;
     }
-    const cl = buildClimate(pw.value.properties.parameter, lat);
-    setStatus('power', 'ok', cl.days.length.toLocaleString() + t(' วัน', ' days'));
+    { const nd = cl.days.length.toLocaleString(); setStatus('power', 'ok', () => nd + t(' วัน', ' days')); }
     let soil = sg.status === 'fulfilled' ? soilFromGrids(sg.value) : null, soilFallback = false;
-    if (soil) setStatus('soil', 'ok', 'pH ' + soil.ph); else { soil = DEMO.soil; soilFallback = true; setStatus('soil', 'err', t('ไม่มีค่า ใช้ค่าเดโม', 'no value; demo soil used')); }
+    if (soil) setStatus('soil', 'ok', 'pH ' + soil.ph); else { soil = { ...SOIL_DEFAULT }; soilFallback = true; setStatus('soil', 'err', () => t('ไม่มีค่า ใช้ค่าสมมติ', 'no value; assumed')); }
     const dem = slp.status === 'fulfilled' ? slp.value : null, slopeSamples = dem ? dem.samples : [];
-    setStatus('slope', slopeSamples.length ? 'ok' : 'err', slopeSamples.length ? pct(slopeSamples, .5).toFixed(0) + '%' : t('ดึงไม่ได้', 'failed'));
-    site = { name: 'live', lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, soil, soilFallback, slopeSamples, dem, fetched: new Date().toISOString().slice(0, 10) };
+    setStatus('slope', slopeSamples.length ? 'ok' : 'err', slopeSamples.length ? pct(slopeSamples, .5).toFixed(0) + '%' : () => t('ดึงไม่ได้', 'failed'));
+    site = { lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, soil, soilFallback, slopeSamples, dem, fetched: isoDay(Date.now()) };
     liveCache.set(key, site);
-  } else ['power', 'soil', 'slope'].forEach(k => setStatus(k, 'ok', t('จากแคช', 'cached')));
-  setMode('live', site);
+  } else { setStatus('power', 'ok', () => t('จากแคช', 'cached')); setStatus('soil', site.soilFallback ? 'err' : 'ok', 'pH ' + site.soil.ph); setStatus('slope', site.slopeSamples.length ? 'ok' : 'err', ''); }
+  applySite(site);
   loadRecent(site);
+  loadNdvi(site);
 }
 function setLoc() {
-  $('locText').innerHTML = MODE === 'live' ? t(`จุดที่เลือก (ข้อมูลสด)<br>${fmtLL(S.lat, S.lon)}`, `Selected point (live data)<br>${fmtLL(S.lat, S.lon)}`) : t('พื้นที่เดโม: ลพบุรีตะวันออก 8×8 km<br>15.180°N 101.130°E', 'Demo area: east Lopburi, Thailand, 8×8 km<br>15.180°N 101.130°E');
-  if ($('liveTitle') && MODE === 'live') $('liveTitle').textContent = t(`จุด ${fmtLL(S.lat, S.lon)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${fmtLL(S.lat, S.lon)} · live NASA data (fetched ${S.fetched})`);
+  if (!S) return;
+  $('locText').innerHTML = t(`จุดที่วิเคราะห์ (ข้อมูลสด)<br>${fmtLL(S.lat, S.lon)}`, `Analysed point (live data)<br>${fmtLL(S.lat, S.lon)}`);
+  $('liveTitle').textContent = t(`จุด ${fmtLL(S.lat, S.lon)} · ดึงเมื่อ ${S.fetched}`, `Point ${fmtLL(S.lat, S.lon)} · fetched ${S.fetched}`);
 }
-function setMode(mode, site) {
-  MODE = mode; S = site; evKey = ''; recCache.key = '';
-  if (map) {
-    if (mode === 'live') {
-      if (liveMarker) liveMarker.setLatLng([S.lat, S.lon]); else liveMarker = L.circleMarker([S.lat, S.lon], { radius: 7, color: '#ffffff', weight: 3, fillColor: '#c4512b', fillOpacity: 1, interactive: false }).addTo(map);
-      setGrid(liveGrid(S));
-      map.setView([S.lat, S.lon], 14);
-    } else {
-      if (liveMarker) { map.removeLayer(liveMarker); liveMarker = null; }
-      setGrid(demoGrid());
-      map.setView([DEMO.lat, DEMO.lon], 13);
-    }
+function applySite(site) {
+  S = site; evKey = ''; recCache.key = ''; delete $('summary').dataset.err;
+  if (map) setGrid(liveGrid(S));
+  renderAll();
+}
+/* MODIS NDVI at the clicked pixel for the last year (ORNL DAAC web service; slow: ~30–60 s). Cloud-screened with pixel_reliability. */
+function modisDates() {
+  const out = [], end = Date.now() - 12 * 864e5, start = end - 372 * 864e5;
+  for (let y = new Date(start).getUTCFullYear(); y <= new Date(end).getUTCFullYear(); y++) for (let doy = 1; doy <= 353; doy += 16) {
+    const ms = Date.UTC(y, 0, doy); if (ms >= start && ms <= end) out.push({ a: `A${y}${String(doy).padStart(3, '0')}`, iso: isoDay(ms) });
   }
-  $('liveTitle').textContent = mode === 'live' ? t(`จุด ${fmtLL(S.lat, S.lon)} · ข้อมูล NASA สด (ดึงเมื่อ ${S.fetched})`, `Point ${fmtLL(S.lat, S.lon)} · live NASA data (fetched ${S.fetched})`) : '';
-  $('liveBox').hidden = mode !== 'live';
-  setLoc();
-  document.querySelectorAll('.demoOnly').forEach(el => el.hidden = mode === 'live');
-  if (mode === 'demo') { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
-  $('baseSel').value = mode === 'live' ? '0' : '3';
-  update(); drawCharts(); trends(); soilTiles(); paintCells(); links();
+  return out;
+}
+function classifyNdvi(a) {
+  const K = a.length, mn = Math.min(...a), mx = Math.max(...a), amp = mx - mn, len = a.filter(v => v >= mn + 0.5 * amp).length; let pk = 0;
+  for (let i = 0; i < K; i++) { if ([1, 2, 3].every(j => a[i] >= a[(i - j + K) % K] && a[i] >= a[(i + j) % K])) { const lo = Math.min(...[1, 2, 3, 4, 5, 6].map(j => Math.min(a[(i - j + K) % K], a[(i + j) % K]))); if (a[i] - lo > 0.1) pk++; } }
+  if (mn >= 0.55) return 0; if (mx < 0.35) return 1; if (pk >= 2) return 2; if (len <= 9) return 3; return 4;
+}
+async function loadNdvi(site) {
+  if (site.ndvi || site.ndviFailed) { setStatus('ndvi', site.ndvi ? 'ok' : 'err', () => site.ndvi ? L2(RNAME[site.ndvi.cls]) : t('ดึงไม่ได้', 'failed')); if (site === S) { drawCharts(); ndviNote(); update(); } return; }
+  setStatus('ndvi', 'load', () => t('~1 นาที', '~1 min')); if (site === S) ndviNote();
+  try {
+    const ds = modisDates(), chunks = []; for (let i = 0; i < ds.length; i += 10) chunks.push(ds.slice(i, i + 10));
+    const url = (band, ch) => `https://modis.ornl.gov/rst/api/v1/MOD13Q1/subset?latitude=${site.lat.toFixed(5)}&longitude=${site.lon.toFixed(5)}&band=${band}&startDate=${ch[0].a}&endDate=${ch.at(-1).a}&kmAboveBelow=0&kmLeftRight=0`;
+    const get = band => Promise.all(chunks.map(ch => getJSON(url(band, ch), 120000, { headers: { Accept: 'application/json' } }).then(j => j.subset || [])));
+    const [nd, rl] = await Promise.all([get('250m_16_days_NDVI'), get('250m_16_days_pixel_reliability')]);
+    const rel = new Map(rl.flat().map(x => [x.modis_date, x.data[0]]));
+    const rows = nd.flat().sort((a, b) => a.modis_date < b.modis_date ? -1 : 1).map(x => { const v = x.data[0], q = rel.get(x.modis_date); return { d: x.calendar_date, v: (q === 0 || q === 1) && v > -2000 ? v * 1e-4 : null }; });
+    const good = rows.filter(r => r.v != null);
+    if (rows.length < 12 || good.length < 6) throw new Error('too few clear observations');
+    const raw = rows.map(r => r.v), x = raw.slice();
+    let last = -1;
+    for (let i = 0; i < x.length; i++) if (x[i] != null) { if (last < 0) for (let k = 0; k < i; k++) x[k] = x[i]; else for (let k = last + 1; k < i; k++) x[k] = x[last] + (x[i] - x[last]) * (k - last) / (i - last); last = i; }
+    for (let k = last + 1; k < x.length; k++) x[k] = x[last];
+    const smooth = x.map((v, i) => i === 0 || i === x.length - 1 ? v : 0.25 * x[i - 1] + 0.5 * v + 0.25 * x[i + 1]);
+    const byMonth = Array.from({ length: 12 }, () => []); rows.forEach((r, i) => byMonth[+r.d.slice(5, 7) - 1].push(smooth[i]));
+    const mMean = byMonth.map(a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN);
+    const order = mMean.map((v, m) => [v, m]).filter(p => !isNaN(p[0])).sort((a, b) => a[0] - b[0]);
+    const lowM = order[0][1], lowMonths = [lowM, (lowM + 1) % 12].filter(m => !isNaN(mMean[m]) && mMean[m] <= order[0][0] + 0.08);
+    site.ndvi = { dates: rows.map(r => r.d), raw, smooth: smooth.map(v => +v.toFixed(3)), cls: classifyNdvi(smooth), min: Math.min(...smooth), max: Math.max(...smooth), clear: good.length, total: rows.length,
+      bareMonths: mMean.map((v, m) => v < 0.3 ? m : -1).filter(m => m >= 0), lowMonths };
+    setStatus('ndvi', 'ok', () => L2(RNAME[site.ndvi.cls]));
+  } catch (e) { site.ndviFailed = e.message || 'error'; setStatus('ndvi', 'err', () => t('ดึงไม่ได้', 'failed')); }
+  if (site === S) { drawCharts(); ndviNote(); update(); }
+}
+function ndviNote() {
+  if (!S) return; const n = S.ndvi; let h;
+  if (n) h = `<b>${L2(RNAME[n.cls])}</b> · NDVI ${n.min.toFixed(2)}–${n.max.toFixed(2)} · ${n.bareMonths.length ? t('ดินโล่ง (NDVI < 0.3): ', 'bare soil (NDVI < 0.3): ') + n.bareMonths.map(m => MTH[LANG][m]).join(', ') : t('ไม่มีเดือนที่ NDVI ต่ำกว่า 0.3 · พืชคลุมดินน้อยสุด: ', 'no month below NDVI 0.3 · lowest cover: ') + n.lowMonths.map(m => MTH[LANG][m]).join('–')}<br>MODIS MOD13Q1 250 m (ORNL DAAC) · ${t(`ภาพไม่มีเมฆ ${n.clear}/${n.total}`, `${n.clear}/${n.total} clear composites`)} · ${t('pixel 250 m อาจรวมแปลงข้างเคียง การจำแนกเป็นกฎอย่างง่าย ควรเทียบกับภาพจริง', 'a 250 m pixel may mix neighbouring fields; the class is a simple rule, check it against imagery')}`;
+  else if (S.ndviFailed) h = t('ดึง NDVI ของจุดนี้จาก MODIS ไม่ได้ (บริการ ORNL ช้าหรือไม่มีภาพที่ไม่มีเมฆพอ) ส่วนอื่นยังใช้ได้ตามปกติ', 'Could not get MODIS NDVI for this point (ORNL service slow, or too few clear images). Everything else still works.');
+  else h = t('กำลังดึง NDVI 1 ปีล่าสุดของ pixel นี้จาก MODIS… ใช้เวลาประมาณ 1 นาที ส่วนอื่นใช้งานได้ระหว่างรอ', 'Fetching the last year of MODIS NDVI for this pixel… about 1 minute; the rest of the page works meanwhile.');
+  $('ndviNote').innerHTML = h;
+  $('cNdvi').closest('.chartbox').style.display = n ? '' : 'none';
+  $('baseNote').innerHTML = n ? t(`MODIS เห็นจุดนี้เป็น <b>${L2(RNAME[n.cls])}</b> เลือกแผนที่ใกล้กับที่ปลูกจริงที่สุด`, `MODIS sees this point as <b>${L2(RNAME[n.cls])}</b>. Pick the rotation closest to what is actually grown.`) : t('เลือกแผนที่ใกล้กับที่ปลูกจริงที่สุด ดาวเทียมบอกชื่อพืชไม่ได้', 'Pick the rotation closest to what is actually grown; satellites cannot name the crop.');
 }
 /* T2 — last 90 days vs the same calendar window in 2001–2025 */
 async function loadRecent(site) {
   const box = $('recentBody'); setStatus('recent', 'load', '…');
+  const mine = () => site === S;
   box.innerHTML = `<p class="note">${t('กำลังดึงข้อมูล 90 วันล่าสุดจาก NASA POWER…', 'Fetching the last 90 days from NASA POWER…')}</p>`;
   try {
-    if (!site.days) { const pw = await getJSON(powerURL(site.lat, site.lon, '20010101', '20251231'), 60000); site.days = buildClimate(pw.properties.parameter, site.lat).days; }
     const end = new Date(Date.now() - 2 * 864e5), start = new Date(end.getTime() - 94 * 864e5);
     const j = site.recentJSON || await getJSON(powerURL(site.lat, site.lon, ymd(start), ymd(end)), 30000); site.recentJSON = j;
     const P = j.properties.parameter, keys = Object.keys(P.PRECTOTCORR).filter(k => P.PRECTOTCORR[k] > -900 && P.T2M_MAX[k] > -900);
@@ -642,7 +660,8 @@ async function loadRecent(site) {
     const verdict = pctP <= -25 ? t('แห้งกว่าปกติชัดเจน: ดินน่าจะชื้นน้อย พืชที่ปลูกช่วงนี้เสี่ยงขาดน้ำ ให้ดูค่าน้ำ "ปีแล้ง" ในการ์ด', 'Clearly drier than normal: soil is likely dry, so crops sown now risk water stress; check the "dry year" figures in the cards')
       : pctP >= 25 ? t('ฝนมากกว่าปกติ: เสี่ยงน้ำขังและดินพังในแปลงที่ดินโล่ง', 'Wetter than normal: waterlogging and erosion risk on bare fields')
       : t('ใกล้เคียงปกติ', 'Close to normal');
-    S.recent = { pctP, dTx };
+    site.recent = { pctP, dTx };
+    if (!mine()) return;
     box.innerHTML = `<div class="tiles">
       <div>${t('ฝน 90 วัน', 'Rain, 90 days')}<b>${Math.round(cum)} mm</b>${t('ปกติ', 'normal')} ${Math.round(nP)} mm <span class="pill ${Math.abs(pctP) >= 25 ? 'sig' : 'ns'}">${pctP >= 0 ? '+' : ''}${Math.round(pctP)}%</span></div>
       <div>${t('Tmax เฉลี่ย', 'Mean Tmax')}<b>${nowTx.toFixed(1)} °C</b>${dTx >= 0 ? '+' : ''}${dTx.toFixed(1)} °C ${t('เทียบปกติ', 'vs normal')}</div>
@@ -663,7 +682,8 @@ async function loadRecent(site) {
         options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: { legend: { labels: { boxWidth: 12, filter: i => i.text !== '_lo' } } } } });
     }
   } catch (e) {
-    setStatus('recent', 'err', t('ดึงไม่ได้', 'failed'));
+    if (!mine()) return;
+    setStatus('recent', 'err', () => t('ดึงไม่ได้', 'failed'));
     box.innerHTML = `<p class="note">${t('ดึงข้อมูลล่าสุดจาก NASA POWER ไม่ได้ ลองใหม่ภายหลัง', 'Could not fetch recent NASA POWER data; try again later')} (${e.message})</p>`;
   }
 }
@@ -686,11 +706,14 @@ $('coordForm').addEventListener('submit', ev => {
   if (!c) { $('coordMsg').textContent = t('อ่านพิกัดไม่ได้ ใช้รูปแบบ 30.9N 75.85E', 'Could not read that; use 30.9N 75.85E'); return; }
   loadLive(c[0], c[1]);
 });
-$('backDemo').onclick = () => { setMode('demo', DEMO); loadRecent(DEMO); $('liveBox').hidden = true; };
+$('geoBtn').onclick = () => {
+  if (!navigator.geolocation) { $('coordMsg').textContent = t('เบราว์เซอร์นี้ไม่รองรับการระบุตำแหน่ง', 'This browser has no geolocation'); return; }
+  $('coordMsg').textContent = t('กำลังขอตำแหน่ง…', 'Requesting location…');
+  navigator.geolocation.getCurrentPosition(p => { $('coordMsg').textContent = ''; loadLive(p.coords.latitude, p.coords.longitude); },
+    () => { $('coordMsg').textContent = t('ไม่ได้รับอนุญาตให้ใช้ตำแหน่ง พิมพ์พิกัดหรือคลิกแผนที่แทน', 'Location not allowed; type coordinates or click the map instead'); }, { timeout: 15000, maximumAge: 600000 });
+};
 document.body.dataset.lang = LANG;
-fetch('data/site.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(d => {
-  DEMO = d; S = d; buildControls(); setLang(LANG); initMap(); paintCells();
-  const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', drawCharts);
-  const m = location.hash.match(/^#p=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
-  if (m) loadLive(+m[1], +m[2]); else loadLive(DEMO.lat, DEMO.lon);
-}).catch(e => { $('summary').textContent = t('โหลดข้อมูลไม่ได้: ', 'Could not load data: ') + e.message; });
+setLang(LANG); initMap();
+$('liveList').innerHTML = liveStatusHTML();
+{ const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener && mq.addEventListener('change', () => S && drawCharts()); }
+{ const m = location.hash.match(/^#p=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/); if (m) loadLive(+m[1], +m[2]); else loadLive(DEFAULT_POINT[0], DEFAULT_POINT[1]); }

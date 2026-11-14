@@ -134,28 +134,28 @@ th{font-family:var(--f-display);font-weight:600}
       <button type="button" class="btn" id="lTH" aria-pressed="true">ไทย</button>
       <button type="button" class="btn" id="lEN" aria-pressed="false">English</button>
     </div>
-    <div class="loc" id="locText">พื้นที่เดโม: ลพบุรีตะวันออก 8×8 km<br>15.18°N 101.13°E</div>
+    <div class="loc" id="locText"></div>
   </div>
 </header>
 
-<p class="banner"><span class="th"><b>เครื่องมือนี้ช่วยสำรวจทางเลือก ไม่ได้แทนการตัดสินใจของเกษตรกรหรือเจ้าหน้าที่เกษตรในพื้นที่</b> · ข้อมูลหลัก: NASA POWER, MODIS (NDVI, Land Cover), SRTM · ข้อมูลเสริม: SoilGrids · รายได้ผู้ใช้ตั้งเอง</span><span class="en"><b>This tool helps explore options. It does not replace the judgment of farmers or local agricultural experts.</b> · Core data: NASA POWER, MODIS (NDVI, Land Cover), SRTM · Supplementary: SoilGrids · Income is set by the user</span></p>
+<p class="banner"><span class="th"><b>เครื่องมือนี้ช่วยสำรวจทางเลือก ไม่ได้แทนการตัดสินใจของเกษตรกรหรือเจ้าหน้าที่เกษตรในพื้นที่</b> · ข้อมูลทั้งหมดดึงสดตามจุดที่เลือก: NASA POWER, MODIS NDVI, SRTM, NASA GIBS · ข้อมูลเสริม: SoilGrids · รายได้ผู้ใช้ตั้งเอง</span><span class="en"><b>This tool helps explore options. It does not replace the judgment of farmers or local agricultural experts.</b> · All data is fetched live for the chosen point: NASA POWER, MODIS NDVI, SRTM, NASA GIBS · Supplementary: SoilGrids · Income is set by the user</span></p>
 
 <section class="block mapband" aria-label="Map">
   <div style="position:relative;min-width:0">
-    <div id="map" role="application" aria-label="Map of the demo area"></div>
+    <div id="map" role="application" aria-label="Map"></div>
     <div id="tileMsg" hidden></div>
   </div>
   <div class="mapctl">
     <form id="coordForm" class="ctl" autocomplete="off">
       <label for="coordIn"><span><span class="th">ไปที่พิกัด</span><span class="en">Go to coordinates</span></span></label>
       <div class="row" style="flex-wrap:nowrap"><input id="coordIn" type="text" placeholder="15.18N 101.13E" style="flex:1;min-width:0;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"><button type="submit" class="btn"><span class="th">วิเคราะห์</span><span class="en">Analyse</span></button></div>
-      <p class="note" id="coordMsg"><span class="th">เช่น 30.9N 75.85E หรือ 31.2S 60.5W · หรือคลิกแผนที่นอกกริด</span><span class="en">e.g. 30.9N 75.85E or 31.2S 60.5W · or click the map outside the grid</span></p>
+      <p class="note" id="coordMsg"><span class="th">เช่น 30.9N 75.85E หรือ 31.2S 60.5W · หรือคลิกตรงไหนก็ได้บนแผนที่</span><span class="en">e.g. 30.9N 75.85E or 31.2S 60.5W · or click anywhere on the map</span></p>
     </form>
-    <div id="liveBox" hidden>
+    <div id="liveBox">
       <div class="lbl"><span class="th">ข้อมูล NASA สด</span><span class="en">Live NASA data</span></div>
       <p class="note" id="liveTitle"></p>
       <ul class="live" id="liveList"></ul>
-      <button type="button" class="btn" id="backDemo"><span class="th">ดูตัวอย่างลพบุรี (มี k-means)</span><span class="en">Lopburi example (with k-means)</span></button>
+      <div class="row"><button type="button" class="btn" id="geoBtn"><span class="th">ใช้ตำแหน่งของฉัน</span><span class="en">Use my location</span></button><button type="button" class="btn" id="retryBtn" hidden><span class="th">ลองใหม่</span><span class="en">Retry</span></button></div>
     </div>
     <div>
       <div class="lbl"><span class="th">ผลวิเคราะห์ (แถบรวม)</span><span class="en">Analysis (combined)</span></div>
@@ -197,7 +197,7 @@ th{font-family:var(--f-display);font-weight:600}
   <div class="ctl">
     <h2><span class="th">แผนปัจจุบันของแปลง</span><span class="en">Current rotation</span></h2>
     <select id="baseSel" aria-label="Current rotation"></select>
-    <p class="note"><span class="th">ค่าเริ่มต้นจาก MODIS: 52% ของพื้นที่มีรูปแบบพืชไร่อายุยาว (มันสำปะหลัง/อ้อย)</span><span class="en">Default from MODIS: 52% of the area shows a long-season field-crop pattern (cassava/sugarcane)</span></p>
+    <p class="note" id="baseNote"></p>
   </div>
   <div>
     <h2><span class="th">สิ่งที่ให้ความสำคัญ</span><span class="en">Priorities</span></h2>
@@ -237,10 +237,10 @@ th{font-family:var(--f-display);font-weight:600}
   </section>
 
   <section class="block">
-    <h2><span class="th">อากาศและพืชพรรณของพื้นที่</span><span class="en">Climate and vegetation of the area</span></h2>
+    <h2><span class="th">อากาศและพืชพรรณของจุดนี้</span><span class="en">Climate and vegetation at this point</span></h2>
     <div class="charts">
       <div><div class="chartbox"><canvas id="cClim"></canvas></div><p class="src">NASA POWER 2001–2025 · ET₀: Hargreaves</p></div>
-      <div class="demoOnly"><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src">MODIS MOD13Q1 NDVI, cropland pixels (MCD12Q1), 2022–2024, cloud-masked</p></div>
+      <div><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src" id="ndviNote"></p></div>
     </div>
   </section>
 
@@ -252,29 +252,9 @@ th{font-family:var(--f-display);font-weight:600}
   </section>
 
   <section class="block">
-    <h2><span class="th">SI: จำแนกรูปแบบการปลูกจาก NDVI (2 วิธี) · พื้นที่เดโม</span><span class="en">SI: classifying cropping patterns from NDVI (2 methods) · demo area</span></h2>
-    <div class="charts">
-      <div><div class="chartbox"><canvas id="cProf"></canvas></div><p class="src"><span class="th">กราฟ NDVI รายปีเฉลี่ยของแต่ละกลุ่ม k-means</span><span class="en">Mean annual NDVI profile of each k-means cluster</span></p></div>
-      <div class="tbl">
-        <table>
-          <thead><tr><th></th><th>k-means (k=6)</th><th><span class="th">กฎ phenology</span><span class="en">Phenology rules</span></th></tr></thead>
-          <tbody>
-            <tr><td><span class="th">หลักการ</span><span class="en">Idea</span></td><td><span class="th">จัดกลุ่ม pixel ที่กราฟ NDVI รายปี (23 ค่า) คล้ายกัน</span><span class="en">Groups pixels with similar annual NDVI curves (23 values)</span></td><td><span class="th">เกณฑ์ NDVI ต่ำสุด สูงสุด จำนวนพีค ความยาวฤดู</span><span class="en">Thresholds on min/max NDVI, peak count, season length</span></td></tr>
-            <tr><td><span class="th">ข้อดี</span><span class="en">Strength</span></td><td><span class="th">แยกความหนาแน่นของพืชได้ละเอียด</span><span class="en">Separates canopy density levels</span></td><td><span class="th">อธิบายได้ทันที</span><span class="en">Directly interpretable</span></td></tr>
-            <tr><td><span class="th">ข้อเสีย</span><span class="en">Weakness</span></td><td><span class="th">ต้องตีความชื่อกลุ่มและเลือก k เอง</span><span class="en">Clusters need interpretation; k must be chosen</span></td><td><span class="th">pixel ปนถูกรวมเป็นกลุ่มเดียว (74% "พืชอายุยาว")</span><span class="en">Mixed pixels collapse into one class (74% "long-season")</span></td></tr>
-            <tr><td><span class="th">ผลตรงกัน</span><span class="en">Agreement</span></td><td colspan="2">82%</td></tr>
-          </tbody>
-        </table>
-        <p class="note" style="margin-top:6px"><span class="th">เลือก k = 6 จาก elbow ของ SSE: k3 73.6 · k4 58.5 · k5 50.0 · k6 44.9 · k7 41.6</span><span class="en">k = 6 chosen from the SSE elbow: k3 73.6 · k4 58.5 · k5 50.0 · k6 44.9 · k7 41.6</span></p>
-      </div>
-    </div>
-    <p class="banner" style="margin:14px 0 0"><span class="th"><b>สิ่งที่ข้อมูลบอก:</b> ที่ 250 m ไม่มี pixel ไหนที่ NDVI ต่ำกว่า 0.3 (ดินโล่งจริง) ช่วงที่พืชคลุมดินน้อยที่สุดคือ <b>มี.ค.–พ.ค.</b> ตรงกับช่วงร้อนจัดและฝนแรกที่ตกหนัก จึงเสี่ยงดินพังทลายที่สุด แปลงเล็กกว่า 250 m อาจโล่งจริงแต่ถูกเฉลี่ยรวมกับพืชข้างเคียง ใช้ HLS 30 m ใน Worldview ยืนยันได้</span><span class="en"><b>What the data shows:</b> at 250 m no pixel drops below NDVI 0.3 (true bare soil). Ground cover is lowest in <b>March–May</b>, which overlaps the hottest weeks and the first heavy rains, so that is the highest erosion-risk window. Fields smaller than 250 m may be bare but get averaged with neighbouring vegetation; HLS 30 m in Worldview can confirm.</span></p>
-  </section>
-
-  <section class="block">
     <h2><span class="th">ดินและภูมิประเทศของพื้นที่</span><span class="en">Soil and terrain</span></h2>
     <div class="tiles" id="soilTiles"></div>
-    <p class="src">SoilGrids 2.0 (ISRIC) 250 m · PAW: Saxton &amp; Rawls (2006) · Slope: SRTM-derived terrain tiles, averaged per MODIS cell</p>
+    <p class="src">SoilGrids 2.0 (ISRIC) 250 m · PAW: Saxton &amp; Rawls (2006) · Slope: SRTM-derived terrain tiles, 60 m cells</p>
   </section>
 
   <section class="block">
@@ -284,17 +264,17 @@ th{font-family:var(--f-display);font-weight:600}
       <tbody>
         <tr><td><span class="th">น้ำที่ต้องเติม</span><span class="en">Irrigation need</span></td><td>Σ max(0, ET₀×Kc − 0.8×P) <span class="th">ต่อปี 25 ปี → ค่าเฉลี่ย และ P80 (ปีแล้ง 1 ใน 5)</span><span class="en">per year over 25 years → mean and P80 (1-in-5 dry year)</span></td><td>NASA POWER, Kc FAO-56</td></tr>
         <tr><td><span class="th">ความร้อน</span><span class="en">Heat stress</span></td><td><span class="th">วัน Tmax ≥ 35 °C ตอนมีพืช × ความไวของพืช</span><span class="en">Days Tmax ≥ 35 °C during crop months × crop sensitivity</span></td><td>NASA POWER</td></tr>
-        <tr><td><span class="th">กันดินพัง</span><span class="en">Erosion control</span></td><td><span class="th">ฝนที่ตกตอนดินไม่มีพืชคลุม (แนวคิด C factor) · แผนที่: S factor (McCool) จาก slope × (1 − พืชคลุม มี.ค.–พ.ค. จาก NDVI)</span><span class="en">Rain falling on uncovered soil (C-factor idea) · map: McCool S factor from slope × (1 − Mar–May cover from NDVI)</span></td><td>NASA POWER, SRTM, MODIS</td></tr>
+        <tr><td><span class="th">กันดินพัง</span><span class="en">Erosion control</span></td><td><span class="th">ฝนที่ตกตอนดินไม่มีพืชคลุม (แนวคิด C factor) · แผนที่: S factor ของ RUSLE (McCool) จาก slope รายช่อง 60 m</span><span class="en">Rain falling on uncovered soil (C-factor idea) · map: RUSLE S factor (McCool) from slope per 60 m cell</span></td><td>NASA POWER, SRTM</td></tr>
         <tr><td><span class="th">อินทรียวัตถุ / ไนโตรเจน / pH</span><span class="en">Organic matter / N / pH</span></td><td><span class="th">บทบาทพืช ปรับด้วยค่าดินจริง (อินทรียวัตถุต่ำ → ให้น้ำหนักมากขึ้น, pH นอกช่วง → หักคะแนน)</span><span class="en">Crop roles, adjusted by measured soil (low OM → higher weight; pH outside range → penalty)</span></td><td><span class="th">กฎทางเกษตร + SoilGrids</span><span class="en">Agronomic rules + SoilGrids</span></td></tr>
         <tr><td><span class="th">การซึมน้ำ</span><span class="en">Infiltration</span></td><td>0.4×cover + 0.3×OM + 0.3×deep roots</td><td><span class="th">คำนวณจากแผน</span><span class="en">From rotation</span></td></tr>
         <tr><td><span class="th">ตัดวงจรศัตรูพืช</span><span class="en">Pest-cycle break</span></td><td><span class="th">จำนวนวงศ์พืชในรอบ</span><span class="en">Number of plant families in the rotation</span></td><td><span class="th">กฎทางเกษตร</span><span class="en">Agronomic rule</span></td></tr>
-        <tr><td><span class="th">รากลึก</span><span class="en">Deep roots</span></td><td><span class="th">ใช้น้ำชั้นล่างกว่า 45 cm ได้ไม่เกิน 74 mm</span><span class="en">May draw ≤ 74 mm stored below 45 cm</span></td><td>SoilGrids + Saxton &amp; Rawls</td></tr>
-        <tr><td><span class="th">แผนปัจจุบัน</span><span class="en">Current rotation</span></td><td><span class="th">k-means บนกราฟ NDVI รายปีราย pixel</span><span class="en">k-means on per-pixel annual NDVI</span></td><td>MODIS MOD13Q1, MCD12Q1</td></tr>
-        <tr><td><span class="th">แผนแนะนำราย pixel</span><span class="en">Per-cell recommendation</span></td><td><span class="th">MCDA ทั้งหมดข้างบน + น้ำหนักดินเพิ่มตาม slope ของ cell · ไม่แนะนำในป่าและชุมชน</span><span class="en">All criteria above + soil weight raised by the cell's slope · not applied to forest or settlements</span></td><td><span class="th">ทุกชุดข้างบน</span><span class="en">All of the above</span></td></tr>
+        <tr><td><span class="th">รากลึก</span><span class="en">Deep roots</span></td><td><span class="th">ใช้น้ำที่ดินเก็บไว้ชั้นล่างกว่า 45 cm ได้ (คำนวณจากเนื้อดินของจุดนั้น)</span><span class="en">May draw the water stored below 45 cm (computed from that point's soil texture)</span></td><td>SoilGrids + Saxton &amp; Rawls</td></tr>
+        <tr><td><span class="th">รูปแบบพืชพรรณของจุดนี้</span><span class="en">Vegetation pattern at the point</span></td><td><span class="th">NDVI 1 ปีล่าสุดของ pixel ที่คลิก ตัดค่าที่มีเมฆออก แล้วจำแนกด้วยกฎ phenology (ค่าต่ำสุด สูงสุด จำนวนพีค ความยาวฤดู)</span><span class="en">Last year of NDVI at the clicked pixel, cloud-masked, classified by phenology rules (min, max, peak count, season length)</span></td><td>MODIS MOD13Q1 (ORNL DAAC)</td></tr>
+        <tr><td><span class="th">แผนแนะนำรายช่อง</span><span class="en">Per-cell recommendation</span></td><td><span class="th">MCDA ทั้งหมดข้างบน + น้ำหนักดินเพิ่มตาม slope ของช่อง</span><span class="en">All criteria above + soil weight raised by the cell's slope</span></td><td><span class="th">ทุกชุดข้างบน</span><span class="en">All of the above</span></td></tr>
         <tr><td><span class="th">รายได้</span><span class="en">Income</span></td><td><span class="th">ผู้ใช้ตั้งเอง</span><span class="en">User-set</span></td><td><span class="th">ไม่มีใน NASA</span><span class="en">Not in NASA data</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note" style="margin-top:8px"><span class="th">Scenario: ET₀ +2.2% ต่อ +1 °C (ความไวของ Hargreaves), วันร้อน +30% ต่อ +1 °C (ประมาณ), ฝนปรับตามสัดส่วนทุกเดือน · ข้อจำกัด: ภูมิอากาศ ~50 km และดินเป็นค่าจุดเดียว ความต่างระหว่าง cell จึงมาจาก slope และพืชคลุมดินเท่านั้น</span><span class="en">Scenario: ET₀ +2.2% per +1 °C (Hargreaves sensitivity), hot days +30% per +1 °C (approximate), rainfall scaled monthly · Limits: climate is ~50 km and soil is a single point, so differences between cells come only from slope and ground cover</span></p>
+    <p class="note" style="margin-top:8px"><span class="th">Scenario: ET₀ +2.2% ต่อ +1 °C (ความไวของ Hargreaves), วันร้อน +30% ต่อ +1 °C (ประมาณ), ฝนปรับตามสัดส่วนทุกเดือน · ข้อจำกัด: ภูมิอากาศ ~50 km และดิน 250 m เป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจาก slope เท่านั้น · แผนหมุนเวียน 5 แบบเป็นชุดตั้งต้นสำหรับพืชไร่เขตร้อน ยังไม่ได้คัดพืชตามจุด</span><span class="en">Scenario: ET₀ +2.2% per +1 °C (Hargreaves sensitivity), hot days +30% per +1 °C (approximate), rainfall scaled monthly · Limits: climate (~50 km) and soil (250 m) are single values for the grid, so cells differ only by slope · the 5 rotations are a starter set for tropical field crops, not yet screened per point</span></p>
   </section>
 
   <section class="block">
@@ -331,7 +311,6 @@ th{font-family:var(--f-display);font-weight:600}
       <dt>P80 / <span class="th">ปีแล้ง 1 ใน 5</span><span class="en">1-in-5 dry year</span></dt><dd><span class="th">ค่าที่ 4 ใน 5 ปีดีกว่านี้ ใช้วัดความเสี่ยงแทนค่าเฉลี่ย</span><span class="en">The value that 4 years in 5 are better than; a risk measure instead of the average</span></dd>
       <dt>RUSLE / C, S factor</dt><dd><span class="th">สมการประเมินดินพังทลาย C = ผลของสิ่งคลุมดิน S = ผลของความลาดชัน</span><span class="en">Soil-loss equation; C = effect of cover, S = effect of slope</span></dd>
       <dt>Mann-Kendall / Sen's slope</dt><dd><span class="th">ทดสอบว่ามีแนวโน้มจริงไหม และเปลี่ยนเร็วแค่ไหน</span><span class="en">Tests whether a trend is real and how fast it changes</span></dd>
-      <dt>k-means</dt><dd><span class="th">วิธี SI แบบไม่ต้องมีป้ายกำกับ จัดกลุ่มข้อมูลที่คล้ายกัน</span><span class="en">Unsupervised SI method that groups similar data</span></dd>
     </dl>
   </section>
   <p class="src" style="text-align:center">Field Shift Map · NASA Space Apps Challenge 2026 · <span class="th">พัฒนาโดยใช้ AI ช่วย ดูรายละเอียดในหน้าโปรเจกต์</span><span class="en">Built with AI assistance; see the project page for disclosure</span></p>

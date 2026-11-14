@@ -451,7 +451,7 @@ function links() {
 function drawCharts() {
   if (!window.Chart) return;
   Chart.defaults.color = css('--muted'); Chart.defaults.borderColor = css('--line'); Chart.defaults.font.family = 'IBM Plex Sans Thai, system-ui, sans-serif';
-  Object.values(charts).forEach(c => c.destroy());
+  for (const k in charts) { charts[k].destroy(); delete charts[k]; }
   const lg = { legend: { labels: { boxWidth: 12 } } };
   charts.clim = new Chart($('cClim'), { data: { labels: MTH[LANG], datasets: [
     { type: 'bar', label: t('ฝน (mm)', 'Rain (mm)'), data: S.clim.map(c => c[0]), backgroundColor: css('--water'), yAxisID: 'y' },
@@ -460,7 +460,7 @@ function drawCharts() {
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true, title: { display: true, text: t('mm/เดือน', 'mm/month') } }, y2: { position: 'right', beginAtZero: true, max: 31, grid: { display: false } } }, plugins: lg } });
   if (S.ndvi) charts.ndvi = new Chart($('cNdvi'), { type: 'line', data: { labels: S.ndvi.dates.map(d => `${+d.slice(8, 10)} ${MTH[LANG][+d.slice(5, 7) - 1]} ${d.slice(2, 4)}`), datasets: [
     { label: t('NDVI ของ pixel นี้', 'NDVI at this pixel'), data: S.ndvi.smooth, borderColor: css('--crop'), backgroundColor: css('--crop'), tension: .3, pointRadius: 0, borderWidth: 2.5 },
-    { label: t('ค่าดิบ (ผ่านการกรองเมฆ)', 'Raw (cloud-screened)'), data: S.ndvi.raw, borderColor: 'transparent', backgroundColor: css('--muted'), pointRadius: 3, showLine: false },
+    { label: t('ค่าดิบที่ใช้ได้', 'Raw, usable'), data: S.ndvi.raw, borderColor: 'transparent', backgroundColor: css('--muted'), pointRadius: 3, showLine: false },
     { label: t('เกณฑ์ดินโล่ง 0.3', 'Bare-soil threshold 0.3'), data: S.ndvi.dates.map(() => .3), borderColor: css('--soil'), borderDash: [5, 4], pointRadius: 0 }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { min: 0, max: 1 }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: lg } });
   { const A = S.ndvi && S.ndvi.area; if (A && A.k) charts.prof = new Chart($('cProf'), { type: 'line', data: { labels: S.ndvi.dates.map(d => `${+d.slice(8, 10)} ${MTH[LANG][+d.slice(5, 7) - 1]}`), datasets: A.cents.map((c, i) => ({ label: kmName(A, i), data: c.prof, borderColor: KM_COL[i], backgroundColor: KM_COL[i], pointRadius: 0, tension: .3, borderWidth: 2 })) },
@@ -469,6 +469,7 @@ function drawCharts() {
     { type: 'bar', label: t('ฝนรายปี (mm)', 'Annual rain (mm)'), data: S.annual.map(a => a[1]), backgroundColor: css('--water'), yAxisID: 'y' },
     { type: 'line', label: t('วัน ≥35 °C', 'Days ≥35 °C'), data: S.annual.map(a => a[3]), borderColor: css('--heat'), backgroundColor: css('--heat'), pointRadius: 2, yAxisID: 'y2' }] },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, y2: { position: 'right', beginAtZero: true, grid: { display: false } } }, plugins: lg } });
+  drawRecent();
 }
 function sen(xs, ys) { const s = []; for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) s.push((ys[j] - ys[i]) / (xs[j] - xs[i])); return pct(s, .5); }
 function erfc(x) { const z = 1 / (1 + .5 * x); return z * Math.exp(-x * x - 1.26551223 + z * (1.00002368 + z * (.37409196 + z * (.09678418 + z * (-.18628806 + z * (.27886807 + z * (-1.13520398 + z * (1.48851587 + z * (-.82215223 + z * .17087277))))))))); }
@@ -977,6 +978,17 @@ function ndviNote() {
   $('baseNote').innerHTML = (n ? t(`MODIS เห็นจุดนี้เป็น <b>${L2(RNAME[n.cls])}</b> · `, `MODIS sees this point as <b>${L2(RNAME[n.cls])}</b> · `) : '') + t('ดาวเทียมบอกชื่อพืชไม่ได้ เลือกพืชที่ปลูกจริงเพื่อให้แผนทางเลือกตรงกับแปลง ถ้าไม่เลือก ระบบจะเดาจากอากาศ', 'Satellites cannot name the crop. Pick what is actually grown so the alternatives match the field; otherwise the tool guesses from climate.');
 }
 /* T2 — last 90 days vs the same calendar window in 2001–2025 */
+/* Kept separate so a full chart redraw (NDVI arriving, language or theme change) redraws this one too */
+function drawRecent() {
+  const d = S && S.recentChart, cv = $('cRecent'); if (!window.Chart || !d || !cv) return;
+  if (charts.recent) { charts.recent.destroy(); delete charts.recent; }
+  charts.recent = new Chart(cv, { type: 'line', data: { labels: d.last.map(k => `${+k.slice(6, 8)} ${MTH[LANG][+k.slice(4, 6) - 1]}`), datasets: [
+    { label: t('ฝนสะสมปีนี้ (mm)', 'Cumulative rain now (mm)'), data: d.nowCum, borderColor: css('--water'), backgroundColor: css('--water'), pointRadius: 0, borderWidth: 2.5 },
+    { label: t('ค่าปกติ 2001–2025', 'Normal 2001–2025'), data: d.normCum, borderColor: css('--muted'), borderDash: [5, 4], pointRadius: 0 },
+    { label: t('ช่วง 20–80%', '20–80% range'), data: d.hi, borderColor: 'transparent', backgroundColor: 'rgba(42,111,158,.18)', fill: '+1', pointRadius: 0 },
+    { label: '_lo', data: d.lo, borderColor: 'transparent', pointRadius: 0 }] },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: { legend: { labels: { boxWidth: 12, filter: i => i.text !== '_lo' } } } } });
+}
 async function loadRecent(site) {
   const box = $('recentBody'); setStatus('recent', 'load', '…');
   const mine = () => site === S;
@@ -1019,15 +1031,7 @@ async function loadRecent(site) {
     <div class="chartbox" style="height:220px;margin-top:10px"><canvas id="cRecent"></canvas></div>
     <p class="src">NASA POWER PRECTOTCORR / T2M_MAX · ${fmt(first)} – ${fmt(lastK)} · ${t('ข้อมูลช้ากว่าวันจริง 1–3 วัน ไม่ใช่พยากรณ์', 'about 1–3 days behind real time; not a forecast')}</p>`;
     setStatus('recent', 'ok', `${Math.round(pctP)}%`);
-    if (window.Chart) {
-      charts.recent && charts.recent.destroy();
-      charts.recent = new Chart($('cRecent'), { type: 'line', data: { labels: last.map(k => `${+k.slice(6, 8)} ${MTH[LANG][+k.slice(4, 6) - 1]}`), datasets: [
-        { label: t('ฝนสะสมปีนี้ (mm)', 'Cumulative rain now (mm)'), data: nowCum, borderColor: css('--water'), backgroundColor: css('--water'), pointRadius: 0, borderWidth: 2.5 },
-        { label: t('ค่าปกติ 2001–2025', 'Normal 2001–2025'), data: normCum, borderColor: css('--muted'), borderDash: [5, 4], pointRadius: 0 },
-        { label: t('ช่วง 20–80%', '20–80% range'), data: hi, borderColor: 'transparent', backgroundColor: 'rgba(42,111,158,.12)', fill: '+1', pointRadius: 0 },
-        { label: '_lo', data: lo, borderColor: 'transparent', pointRadius: 0 }] },
-        options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true }, x: { ticks: { maxTicksLimit: 8 } } }, plugins: { legend: { labels: { boxWidth: 12, filter: i => i.text !== '_lo' } } } } });
-    }
+    site.recentChart = { last, nowCum, normCum, lo, hi }; drawRecent();
   } catch (e) {
     if (!mine()) return;
     setStatus('recent', 'err', () => t('ดึงไม่ได้', 'failed'));

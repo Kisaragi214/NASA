@@ -110,6 +110,13 @@ th{font-family:var(--f-display);font-weight:600}
 .leaflet-popup-content{font-size:.84rem;line-height:1.45}
 #tileMsg{position:absolute;left:10px;bottom:10px;z-index:500;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:.78rem;max-width:80%}
 [hidden]{display:none!important}
+.live{list-style:none;padding:0;margin:6px 0 8px;display:flex;flex-direction:column;gap:4px;font-size:.8rem}
+.live li{display:flex;gap:8px;align-items:center}
+.live li i{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
+.live li[data-state="load"] i{background:var(--warn)}
+.live li[data-state="ok"] i{background:var(--crop)}
+.live li[data-state="err"] i{background:var(--heat)}
+.live em{margin-left:auto;font-style:normal;font-family:var(--f-mono);color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -124,7 +131,7 @@ th{font-family:var(--f-display);font-weight:600}
       <button type="button" class="btn" id="lTH" aria-pressed="true">ไทย</button>
       <button type="button" class="btn" id="lEN" aria-pressed="false">English</button>
     </div>
-    <div class="loc"><span class="th">พื้นที่เดโม: ลพบุรีตะวันออก 8×8 km</span><span class="en">Demo area: east Lopburi, Thailand, 8×8 km</span><br>15.18°N 101.13°E</div>
+    <div class="loc" id="locText">พื้นที่เดโม: ลพบุรีตะวันออก 8×8 km<br>15.18°N 101.13°E</div>
   </div>
 </header>
 
@@ -153,8 +160,14 @@ th{font-family:var(--f-display);font-weight:600}
       <label for="opac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oOpac">70%</output></label>
       <input id="opac" type="range" min="0" max="100" value="70">
     </div>
+    <div id="liveBox" hidden>
+      <div class="lbl"><span class="th">ข้อมูล NASA สด</span><span class="en">Live NASA data</span></div>
+      <p class="note" id="liveTitle"></p>
+      <ul class="live" id="liveList"></ul>
+      <button type="button" class="btn" id="backDemo"><span class="th">กลับไปพื้นที่เดโม</span><span class="en">Back to demo area</span></button>
+    </div>
     <div class="legend" id="legend"></div>
-    <p class="note"><span class="th">คลิกช่องบนแผนที่เพื่อดูรายละเอียด · 1 ช่อง ≈ 231 m (pixel MODIS)</span><span class="en">Click a cell for details · 1 cell ≈ 231 m (MODIS pixel)</span></p>
+    <p class="note"><span class="th"><b>คลิกตรงไหนก็ได้ในโลก</b> (นอกกริด) เพื่อวิเคราะห์ด้วยข้อมูล NASA สด · คลิกช่องในกริดเพื่อดูรายละเอียดพื้นที่เดโม (1 ช่อง ≈ 231 m)</span><span class="en"><b>Click anywhere on Earth</b> (outside the grid) to analyse it with live NASA data · click a grid cell for demo-area details (1 cell ≈ 231 m)</span></p>
     <div class="row">
       <a id="lnkWV" target="_blank" rel="noopener"><span class="th">เปิดใน NASA Worldview (HLS 30 m) ↗</span><span class="en">Open in NASA Worldview (HLS 30 m) ↗</span></a>
       <a id="lnkGE" target="_blank" rel="noopener"><span class="th">เปิดใน Google Earth ↗</span><span class="en">Open in Google Earth ↗</span></a>
@@ -196,6 +209,11 @@ th{font-family:var(--f-display);font-weight:600}
 <div class="main">
   <section class="block summary" id="summary" aria-live="polite"></section>
 
+  <section class="block" id="recentBlock">
+    <h2><span class="th">สภาพอากาศ 90 วันล่าสุด เทียบกับปกติ</span><span class="en">Last 90 days vs normal</span></h2>
+    <div id="recentBody"></div>
+  </section>
+
   <section class="block">
     <h2><span class="th">เทียบแผนหมุนเวียน</span><span class="en">Rotation comparison</span></h2>
     <div class="cards" id="cards"></div>
@@ -205,7 +223,7 @@ th{font-family:var(--f-display);font-weight:600}
     <h2><span class="th">อากาศและพืชพรรณของพื้นที่</span><span class="en">Climate and vegetation of the area</span></h2>
     <div class="charts">
       <div><div class="chartbox"><canvas id="cClim"></canvas></div><p class="src">NASA POWER 2001–2025 · ET₀: Hargreaves</p></div>
-      <div><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src">MODIS MOD13Q1 NDVI, cropland pixels (MCD12Q1), 2022–2024, cloud-masked</p></div>
+      <div class="demoOnly"><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src">MODIS MOD13Q1 NDVI, cropland pixels (MCD12Q1), 2022–2024, cloud-masked</p></div>
     </div>
   </section>
 
@@ -217,7 +235,7 @@ th{font-family:var(--f-display);font-weight:600}
   </section>
 
   <section class="block">
-    <h2><span class="th">SI: จำแนกรูปแบบการปลูกจาก NDVI (2 วิธี)</span><span class="en">SI: classifying cropping patterns from NDVI (2 methods)</span></h2>
+    <h2><span class="th">SI: จำแนกรูปแบบการปลูกจาก NDVI (2 วิธี) · พื้นที่เดโม</span><span class="en">SI: classifying cropping patterns from NDVI (2 methods) · demo area</span></h2>
     <div class="charts">
       <div><div class="chartbox"><canvas id="cProf"></canvas></div><p class="src"><span class="th">กราฟ NDVI รายปีเฉลี่ยของแต่ละกลุ่ม k-means</span><span class="en">Mean annual NDVI profile of each k-means cluster</span></p></div>
       <div class="tbl">

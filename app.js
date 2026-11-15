@@ -115,6 +115,7 @@ function scoreAll(st, soilBoost = 0) {
 /* ---------- terrain & grids ---------- */
 const sFactor = s => { const th = Math.atan(s / 100); return s < 9 ? 10.8 * Math.sin(th) + 0.03 : 16.8 * Math.sin(th) - 0.5; };
 /* GRID = { n, cell (m), polys: [latlngs], info: [{ slope, farm, risk }] } */
+const NOFARM_COL = '#8a8f8b'; /* built-up, water or bare all year (MODIS rule class) */
 let GRID = null, riskBreaks = [], riskBreaksAll = [], fieldOnly = true;
 /* When a field is drawn, the map layers, their legend shares and the erosion levels use only the cells inside it */
 function fieldMask() {
@@ -124,8 +125,9 @@ function fieldMask() {
 }
 function riskSet() {
   if (!GRID) return; const q = a => a.length ? [0.2, 0.4, 0.6, 0.8].map(x => pct(a, x)) : [0, 0, 0, 0];
-  riskBreaksAll = q(GRID.info.filter(x => x.farm).map(x => x.risk));
-  const m = fieldMask(), inside = m ? GRID.info.filter((x, p) => m[p] && x.farm).map(x => x.risk) : [];
+  /* risk levels are ranked among farmland cells only: towns and water do not set the scale */
+  riskBreaksAll = q(GRID.info.filter(x => x.farm && x.fr !== 1).map(x => x.risk));
+  const m = fieldMask(), inside = m ? GRID.info.filter((x, p) => m[p] && x.farm && x.fr !== 1).map(x => x.risk) : [];
   riskBreaks = inside.length >= 5 ? q(inside) : riskBreaksAll;
 }
 const cellInfo = p => GRID.info[p];
@@ -434,7 +436,7 @@ function recFor(st) {
   if (recCache.key === key) return recCache.best;
   const memo = {}; const sMed = sFactor(3);
   const best = GRID.info.map((_, p) => {
-    const ci = cellInfo(p); if (!ci.farm) return -1; if (ci.fr === 1) return -2; /* MODIS sees it as built-up, water or bare all year: no crop advice */
+    const ci = cellInfo(p); if (ci.fr === 1) return -2; if (!ci.farm) return -1; /* MODIS sees it as built-up, water or bare all year: no crop advice */
     const boost = Math.max(-0.3, Math.min(1.5, (sFactor(ci.slope) / sMed - 1) * 0.5));
     const kb = boost.toFixed(2);
     if (!(kb in memo)) { const sc = scoreAll(st, +kb).scores; memo[kb] = sc.indexOf(Math.max(...sc)); }
@@ -453,9 +455,10 @@ function paintCells() {
   GRID.info.forEach((ci, p) => {
     if (mask && !mask[p]) return;
     let col = null;
-    if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
+    if ((mapMode === 'erosion' || mapMode === 'slope') && ci.fr === 1) col = NOFARM_COL;
+    else if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
     else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
-    else if (mapMode === 'rec') col = rec && rec[p] >= 0 ? PLAN_COL[rec[p]] : rec && rec[p] === -2 ? '#8a8f8b' : null;
+    else if (mapMode === 'rec') col = rec && rec[p] >= 0 ? PLAN_COL[rec[p]] : rec && rec[p] === -2 ? NOFARM_COL : null;
     else if (mapMode === 'km') col = A && ci.fk != null ? KM_COL[ci.fk] : null;
     else if (mapMode === 'rules') col = A && ci.fr >= 0 ? RCOL[ci.fr] : null;
     if (!col) return;
@@ -484,9 +487,10 @@ function legend(rec) {
     $('legend').innerHTML = h + (mask ? `<p class="note">${gridNote}</p>` : ''); return;
   }
   if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${(GRID.hasCover ? t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM 30 m) × พืชคลุมดินช่วงต่ำสุด (MODIS 250 m ปรับลงกริดเดียวกัน) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM, 30 m) × low-season ground cover (MODIS 250 m resampled to the same grid), quintiles within the grid') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด · จะคูณด้วยพืชคลุมดินเมื่อ NDVI โหลดเสร็จ', 'RUSLE slope factor S (SRTM), quintiles within the grid · ground cover is applied once NDVI has loaded'))}</p>`;
-  else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
+  else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => cellInfo(p).fr !== 1 && !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
   else if (mapMode === 'rec' && !rec) h = `<p class="note">${t('กำลังสร้างแผน…', 'Building rotations…')}</p>`;
   else if (mapMode === 'rec' && rec) h = R.map((r, i) => count(p => rec[p] === i) === '0%' ? '' : `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v === -2) ? `<span><i style="background:#8a8f8b"></i>${t('ไม่ใช่พื้นที่เกษตร (ชุมชน / น้ำ / โล่งทั้งปี) ไม่แนะนำ', 'Not farmland (built-up / water / bare all year): no advice')}<b>${count(p => rec[p] === -2)}</b></span>` : '') + (rec.some(v => v === -1) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] === -1)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
+  if ((mapMode === 'erosion' || mapMode === 'slope') && GRID.info.some(ci => ci.fr === 1)) h = `<span><i style="background:${NOFARM_COL}"></i>${t('ไม่ใช่พื้นที่เกษตร (ชุมชน / น้ำ / โล่งทั้งปี)', 'Not farmland (built-up / water / bare all year)')}<b>${count(p => cellInfo(p).fr === 1)}</b></span>` + h;
   $('legend').innerHTML = h + `<p class="note">${gridNote}</p>`;
 }
 function cellHTML(p) {

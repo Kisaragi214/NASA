@@ -115,7 +115,19 @@ function scoreAll(st, soilBoost = 0) {
 /* ---------- terrain & grids ---------- */
 const sFactor = s => { const th = Math.atan(s / 100); return s < 9 ? 10.8 * Math.sin(th) + 0.03 : 16.8 * Math.sin(th) - 0.5; };
 /* GRID = { n, cell (m), polys: [latlngs], info: [{ slope, farm, risk }] } */
-let GRID = null, riskBreaks = [];
+let GRID = null, riskBreaks = [], riskBreaksAll = [], fieldOnly = true;
+/* When a field is drawn, the map layers, their legend shares and the erosion levels use only the cells inside it */
+function fieldMask() {
+  if (!GRID || typeof FIELD === 'undefined' || !FIELD || !fieldOnly) return null;
+  if (GRID.maskFor !== FIELD) { const m = new Uint8Array(GRID.info.length); let c = 0; for (let p = 0; p < m.length; p++) { const r = Math.floor(p / GRID.n), q = p % GRID.n; if (inPoly(GRID.lat0 - (r + .5) * GRID.dLat, GRID.lon0 + (q + .5) * GRID.dLon, FIELD.pts)) { m[p] = 1; c++; } } GRID.mask = c ? m : null; GRID.maskN = c; GRID.maskFor = FIELD; }
+  return GRID.mask;
+}
+function riskSet() {
+  if (!GRID) return; const q = a => a.length ? [0.2, 0.4, 0.6, 0.8].map(x => pct(a, x)) : [0, 0, 0, 0];
+  riskBreaksAll = q(GRID.info.filter(x => x.farm).map(x => x.risk));
+  const m = fieldMask(), inside = m ? GRID.info.filter((x, p) => m[p] && x.farm).map(x => x.risk) : [];
+  riskBreaks = inside.length >= 5 ? q(inside) : riskBreaksAll;
+}
 const cellInfo = p => GRID.info[p];
 /* Live grid: n×n square cells of `cell` metres centred on the point (default 133 × 30 m ≈ 4 km).
    Slope comes from the DEM (~20–30 m). Each cell also takes the low-season cover of the 250 m MODIS pixel it falls in,
@@ -396,8 +408,7 @@ function setGrid(grid) {
   if (!gridCanvas) gridCanvas = document.createElement('canvas');
   gridCanvas.width = gridCanvas.height = grid.n;
   if (gridOverlay) { map.removeLayer(gridOverlay); gridOverlay = null; }
-  const all = grid.info.filter(x => x.farm).map(x => x.risk);
-  riskBreaks = all.length ? [0.2, 0.4, 0.6, 0.8].map(q => pct(all, q)) : [0, 0, 0, 0];
+  riskSet();
   recCache.key = '';
   paintCells();
 }
@@ -427,7 +438,9 @@ function paintCells() {
   const op = +$('opac').value / 100; $('oOpac').textContent = Math.round(op * 100) + '%';
   const st = readState(); const rec = mapMode === 'rec' && R.length ? recFor(st) : null;
   const A = S.ndvi && S.ndvi.area, img = new ImageData(GRID.n, GRID.n), cache = {};
+  const mask = fieldMask(); riskSet();
   GRID.info.forEach((ci, p) => {
+    if (mask && !mask[p]) return;
     let col = null;
     if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
     else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
@@ -445,19 +458,19 @@ function paintCells() {
   legend(rec);
 }
 function legend(rec) {
-  const n = GRID.info.length; const count = f => { let c = 0; for (let p = 0; p < n; p++) if (f(p)) c++; return Math.round(c / n * 100) + '%'; };
-  const gridNote = t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`);
+  const mask = fieldMask(), n = GRID.info.length, tot = mask ? GRID.maskN : n; const count = f => { let c = 0; for (let p = 0; p < n; p++) if ((!mask || mask[p]) && f(p)) c++; return Math.round(c / tot * 100) + '%'; };
+  const gridNote = mask ? t(`คิดเฉพาะ ${GRID.maskN.toLocaleString()} ช่อง (ช่องละ ${GRID.cell} m) ที่อยู่ในแปลงที่วาด · สัดส่วนและระดับความเสี่ยงเทียบกันภายในแปลง`, `Only the ${GRID.maskN.toLocaleString()} cells (${GRID.cell} m each) inside the drawn field are used · shares and risk levels are relative within the field`) : t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`);
   let h = '';
   if (mapMode === 'km' || mapMode === 'rules') {
     const A = S.ndvi && S.ndvi.area;
     if (!A) h = `<p class="note">${S.ndviFailed ? t('ดึง NDVI จาก MODIS ไม่ได้ ชั้นนี้จึงไม่มีข้อมูล', 'MODIS NDVI could not be fetched, so this layer is empty') : t('กำลังดึง NDVI จาก MODIS… (~1 นาที)', 'Fetching MODIS NDVI… (~1 min)')}</p>`;
     else {
-      const cl = GRID.info.filter(ci => ci.fr >= 0), share = f => Math.round(cl.filter(f).length / (cl.length || 1) * 100) + '%';
+      const cl = GRID.info.filter((ci, p) => ci.fr >= 0 && (!mask || mask[p])), share = f => Math.round(cl.filter(f).length / (cl.length || 1) * 100) + '%';
       if (mapMode === 'km') h = A.k ? A.cents.map((_, i) => `<span><i style="background:${KM_COL[i]}"></i>${kmName(A, i)}<b>${share(ci => ci.fk === i)}</b></span>`).join('') : `<p class="note">${t('pixel ที่ใช้ได้น้อยเกินไปสำหรับ k-means', 'Too few usable pixels for k-means')}</p>`;
       else h = RNAME.map((nm, i) => cl.some(ci => ci.fr === i) ? `<span><i style="background:${RCOL[i]}"></i>${L2(nm)}<b>${share(ci => ci.fr === i)}</b></span>` : '').join('');
       h += `<p class="note">${t(`ข้อมูลจริงละเอียด 250 m (MODIS ${A.nrows}×${A.ncols} pixel, NDVI 1 ปีล่าสุด) · แต่ละช่อง 30 m ใช้กราฟ NDVI ที่เฉลี่ยตามระยะจาก 4 pixel ที่ใกล้สุด (bilinear) แล้วจำแนกใหม่ ขอบเขตจึงเรียบขึ้น แต่ไม่ได้เห็นรายละเอียดเล็กกว่า 250 m จริง`, `True resolution is 250 m (MODIS ${A.nrows}×${A.ncols} pixels, last year of NDVI) · each 30 m cell uses an NDVI curve blended by distance from the 4 nearest pixels (bilinear) and is classified again, so edges are smoother, but nothing smaller than 250 m is really resolved`)}</p>`;
     }
-    $('legend').innerHTML = h; return;
+    $('legend').innerHTML = h + (mask ? `<p class="note">${gridNote}</p>` : ''); return;
   }
   if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${(GRID.hasCover ? t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM 30 m) × พืชคลุมดินช่วงต่ำสุด (MODIS 250 m ปรับลงกริดเดียวกัน) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM, 30 m) × low-season ground cover (MODIS 250 m resampled to the same grid), quintiles within the grid') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด · จะคูณด้วยพืชคลุมดินเมื่อ NDVI โหลดเสร็จ', 'RUSLE slope factor S (SRTM), quintiles within the grid · ground cover is applied once NDVI has loaded'))}</p>`;
   else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
@@ -1148,10 +1161,11 @@ function mapTools() {
   const tools = [['field', FIELD ? t('วาดแปลงใหม่', 'Redraw field') : t('วาดแปลง', 'Draw field')], ['dist', t('วัดระยะ', 'Measure distance')], ['area', t('วัดพื้นที่', 'Measure area')]];
   toolBox.innerHTML = tools.map(([k, l]) => `<button type="button" data-tool="${k}" aria-pressed="${!!d && d.mode === k}">${l}</button>`).join('')
     + (d ? `<div class="mread">${drawReadout() || (d.mode === 'dist' ? t('แตะจุดเริ่มต้น', 'Tap the start point') : t('แตะมุมแรก', 'Tap the first corner'))}</div><button type="button" id="tDone"${n < drawMin() ? ' disabled' : ''}>${t('เสร็จ', 'Finish')}</button><button type="button" id="tUndo"${n ? '' : ' disabled'}>${t('ถอยจุด', 'Undo point')}</button><button type="button" id="tCancel">${t('ยกเลิก', 'Cancel')}</button>` : '')
+    + (FIELD && !d ? `<button type="button" id="tOnly" aria-pressed="${fieldOnly}">${t('คิดเฉพาะในแปลง', 'Field only')}</button>` : '')
     + `<button type="button" id="tDel" class="del"${has || d ? '' : ' disabled'}>${t('ลบทั้งหมด', 'Delete all')}</button>`;
   toolBox.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { if (drawing && drawing.mode === b.dataset.tool) { drawStop(); fieldUI(); } else drawStart(b.dataset.tool); });
   const on = (id, f) => { const b = toolBox.querySelector('#' + id); if (b) b.onclick = f; };
-  on('tDone', drawFinish); on('tUndo', () => { drawing.pts.pop(); drawRedraw(); }); on('tCancel', () => { drawStop(); fieldUI(); }); on('tDel', clearAll);
+  on('tDone', drawFinish); on('tUndo', () => { drawing.pts.pop(); drawRedraw(); }); on('tCancel', () => { drawStop(); fieldUI(); }); on('tDel', clearAll); on('tOnly', () => { fieldOnly = !fieldOnly; recCache.key = ''; paintCells(); fieldUI(); });
 }
 function setField(pts, analyse) {
   const g = polyGeom(pts);
@@ -1162,9 +1176,9 @@ function setField(pts, analyse) {
   fieldLayer = L.polygon(pts, { color: '#ffffff', weight: 3, fillColor: '#ffffff', fillOpacity: .08, interactive: false }).addTo(map);
   map.fitBounds(fieldLayer.getBounds(), { padding: [40, 40], maxZoom: 17 });
   const far = !S || Math.hypot((S.lat - g.lat) * 110540, (S.lon - g.lon) * g.kx) > 250;
-  if (analyse && far) loadLive(g.lat, g.lon); else update();
+  if (analyse && far) loadLive(g.lat, g.lon); else { update(); paintCells(); }
 }
-function fieldClear() { drawStop(); if (measureLayer) measureLayer.clearLayers(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; update(); }
+function fieldClear() { drawStop(); if (measureLayer) measureLayer.clearLayers(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; update(); paintCells(); }
 function fieldExport() {
   if (!FIELD) return;
   const gj = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Field Shift Map field', area_m2: Math.round(FIELD.area) }, geometry: { type: 'Polygon', coordinates: [[...FIELD.pts, FIELD.pts[0]].map(p => [+p[1].toFixed(6), +p[0].toFixed(6)])] } }] };
@@ -1208,7 +1222,7 @@ function fieldInfo(st, ev, scores) {
   /* grid cells whose centre is inside the field */
   let cells = [];
   if (GRID) { GRID.info.forEach((ci, p) => { const r = Math.floor(p / GRID.n), c = p % GRID.n; if (inPoly(GRID.lat0 - (r + .5) * GRID.dLat, GRID.lon0 + (c + .5) * GRID.dLon, F.pts)) cells.push(ci); }); if (!cells.length) { const p = gridCell(F.lat, F.lon); if (p >= 0) cells.push(GRID.info[p]); } }
-  const A = S.ndvi && S.ndvi.area, hiRisk = cells.length && typeof riskBreaks !== 'undefined' ? cells.filter(ci => ci.farm && riskBreaks.filter(b => ci.risk > b).length >= 3).length / cells.length : null;
+  const A = S.ndvi && S.ndvi.area, hiRisk = cells.length && typeof riskBreaks !== 'undefined' ? cells.filter(ci => ci.farm && riskBreaksAll.filter(b => ci.risk > b).length >= 3).length / cells.length : null;
   let pat = '—';
   if (A && cells.length) { const cnt = {}; cells.forEach(ci => { if (ci.fr >= 0) cnt[ci.fr] = (cnt[ci.fr] || 0) + 1; }); const tot = Object.values(cnt).reduce((a, b) => a + b, 0); if (tot) pat = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${L2(RNAME[k])} ${Math.round(v / tot * 100)}%`).join(' · '); }
   const best = scores.indexOf(Math.max(...scores)), m3 = mm => Math.round(mm * F.area / 1000).toLocaleString();
@@ -1218,7 +1232,7 @@ function fieldInfo(st, ev, scores) {
   $('fieldBody').innerHTML = `<div class="tiles">
       <div>${t('พื้นที่', 'Area')}<b>${rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1)} ${t('ไร่', 'rai')}</b>${ha.toFixed(2)} ha · ${t('กลางแปลง', 'centre')} ${fmtLL(F.lat, F.lon)}</div>
       <div>${t('ความลาดชันในแปลง', 'Slope inside the field')}<b>${sl.length ? (sl.reduce((a, b) => a + b, 0) / sl.length).toFixed(1) + '%' : '—'}</b>${sl.length ? t('สูงสุด ', 'max ') + Math.max(...sl).toFixed(1) + '% · ' + sl.length + t(' จุด (SRTM 30 m)', ' samples (SRTM 30 m)') : t('ไม่มีข้อมูลความสูง', 'no elevation data')}</div>
-      <div>${t('ช่องที่เสี่ยงดินพังสูง', 'Cells at high erosion risk')}<b>${hiRisk == null ? '—' : Math.round(hiRisk * 100) + '%'}</b>${cells.length} ${t('ช่อง 30 m ในแปลง · เทียบกันในกริดรอบจุด', 'cells of 30 m in the field · relative to the grid around the point')}</div>
+      <div>${t('ช่องที่เสี่ยงดินพังสูง', 'Cells at high erosion risk')}<b>${hiRisk == null ? '—' : Math.round(hiRisk * 100) + '%'}</b>${cells.length} ${t('ช่อง 30 m ในแปลง · เทียบกับกริด 4 km รอบจุด', 'cells of 30 m in the field · relative to the 4 km grid around the point')}</div>
       <div>${t('รูปแบบพืชพรรณ (กฎ)', 'Vegetation pattern (rules)')}<b style="font-size:.9rem">${pat}</b>MODIS 250 m</div>
     </div>
     <div class="tbl" style="margin-top:10px"><table class="cmp"><thead><tr><th>${t('น้ำที่ต้องเติมทั้งแปลง (m³ ต่อปี)', 'Irrigation water for the whole field (m³ per year)')}</th><th>${t('ปีปกติ', 'Average year')}</th><th>${t('ปีแล้ง 1 ใน 5', '1-in-5 dry year')}</th></tr></thead><tbody>

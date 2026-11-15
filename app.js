@@ -132,21 +132,32 @@ const cellInfo = p => GRID.info[p];
 /* Live grid: n×n square cells of `cell` metres centred on the point (default 133 × 30 m ≈ 4 km).
    Slope comes from the DEM (~20–30 m). Each cell also takes the low-season cover of the 250 m MODIS pixel it falls in,
    so all layers share one grid (harmonised resolution). Drawn as a single image, not thousands of polygons. */
-function liveGrid(site, n = 133, cell = 30) {
-  const dLat = cell / 111320, dLon = cell / (111320 * Math.cos(site.lat * Math.PI / 180)), h = (n - 1) / 2, info = [];
+function liveGrid(site, n = 133, cell = 30, ctr = null) {
+  const cLat = ctr ? ctr[0] : site.lat, cLon = ctr ? ctr[1] : site.lon;
+  const dLat = cell / 111320, dLon = cell / (111320 * Math.cos(cLat * Math.PI / 180)), h = (n - 1) / 2, info = [];
   const A = site.ndvi && site.ndvi.area;
   for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    const la = site.lat + (h - r) * dLat, lo = site.lon + (c - h) * dLon;
+    const la = cLat + (h - r) * dLat, lo = cLon + (c - h) * dLon;
     const slope = site.dem ? Math.round(site.dem.slope(la, lo) * 10) / 10 : NaN;
     let cover = null, px = -1;
     if (A) { const m = modisPix(A, la, lo); if (m.inside) { px = m.p; const nd = A.lowNd[px]; if (nd != null) cover = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6)); } }
     const sf = isNaN(slope) ? 0 : sFactor(slope);
     let fr = -1, fk = null;
-    if (A && px >= 0 && A.prof) { const sr = resampleProf(A, la, lo); if (sr) { fr = classifyNdvi(sr); if (A.k) { let bd = 1e9; A.cents.forEach((c, i) => { let d = 0; for (let q = 0; q < sr.length; q++) { const e = sr[q] - c.prof[q]; d += e * e; } if (d < bd) { bd = d; fk = i; } }); } } else { fr = A.rule[px]; fk = A.km[px]; } }
+    if (A && px >= 0 && A.prof) { const sr = resampleProf(A, la, lo); if (sr) { { const lo4 = [...sr].sort((x, y) => x - y).slice(0, 4), nd = lo4.reduce((x, y) => x + y, 0) / lo4.length; cover = 1 - Math.max(0, Math.min(1, (nd - 0.2) / 0.6)); } fr = classifyNdvi(sr); if (A.k) { let bd = 1e9; A.cents.forEach((c, i) => { let d = 0; for (let q = 0; q < sr.length; q++) { const e = sr[q] - c.prof[q]; d += e * e; } if (d < bd) { bd = d; fk = i; } }); } } else { fr = A.rule[px]; fk = A.km[px]; } }
     info.push({ slope, cover, px, fr, fk, risk: cover == null ? sf : sf * (0.15 + 0.85 * cover), farm: !isNaN(slope) });
   }
-  const bounds = [[site.lat - (h + .5) * dLat, site.lon - (h + .5) * dLon], [site.lat + (h + .5) * dLat, site.lon + (h + .5) * dLon]];
-  return { n, cell, info, bounds, dLat, dLon, lat0: site.lat + (h + .5) * dLat, lon0: site.lon - (h + .5) * dLon, hasCover: !!A };
+  const bounds = [[cLat - (h + .5) * dLat, cLon - (h + .5) * dLon], [cLat + (h + .5) * dLat, cLon + (h + .5) * dLon]];
+  return { n, cell, info, bounds, dLat, dLon, lat0: cLat + (h + .5) * dLat, lon0: cLon - (h + .5) * dLon, hasCover: !!A };
+}
+/* With a drawn field the grid shrinks to the field and its cells get smaller (down to 5 m), so the field is not a handful of blocks.
+   The finer cells are interpolated: elevation is ~30 m and vegetation 250 m underneath. */
+function gridFor(site) {
+  if (FIELD && fieldOnly) {
+    const las = FIELD.pts.map(p => p[0]), los = FIELD.pts.map(p => p[1]), la0 = Math.min(...las), la1 = Math.max(...las), lo0 = Math.min(...los), lo1 = Math.max(...los);
+    const side = Math.max((la1 - la0) * 111320, (lo1 - lo0) * 111320 * Math.cos(FIELD.lat * Math.PI / 180)), cell = Math.max(5, Math.min(30, Math.ceil(side * 1.06 / 133)));
+    return liveGrid(site, 133, cell, [(la0 + la1) / 2, (lo0 + lo1) / 2]);
+  }
+  return liveGrid(site);
 }
 function gridCell(lat, lon) {
   if (!GRID) return -1;
@@ -459,7 +470,7 @@ function paintCells() {
 }
 function legend(rec) {
   const mask = fieldMask(), n = GRID.info.length, tot = mask ? GRID.maskN : n; const count = f => { let c = 0; for (let p = 0; p < n; p++) if ((!mask || mask[p]) && f(p)) c++; return Math.round(c / tot * 100) + '%'; };
-  const gridNote = mask ? t(`คิดเฉพาะ ${GRID.maskN.toLocaleString()} ช่อง (ช่องละ ${GRID.cell} m) ที่อยู่ในแปลงที่วาด · สัดส่วนและระดับความเสี่ยงเทียบกันภายในแปลง`, `Only the ${GRID.maskN.toLocaleString()} cells (${GRID.cell} m each) inside the drawn field are used · shares and risk levels are relative within the field`) : t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`);
+  const gridNote = mask ? t(`คิดเฉพาะ ${GRID.maskN.toLocaleString()} ช่อง (ช่องละ ${GRID.cell} m) ที่อยู่ในแปลงที่วาด · สัดส่วนและระดับความเสี่ยงเทียบกันภายในแปลง${GRID.cell < 30 ? ' · ช่องเล็กกว่า 30 m เป็นการแบ่งย่อยเพื่อแสดงผล (ข้อมูลจริง: ความสูง ~30 m, พืชพรรณ 250 m)' : ''}`, `Only the ${GRID.maskN.toLocaleString()} cells (${GRID.cell} m each) inside the drawn field are used · shares and risk levels are relative within the field${GRID.cell < 30 ? ' · cells under 30 m are interpolated for display (true data: elevation ~30 m, vegetation 250 m)' : ''}`) : t(`กริด ${GRID.n}×${GRID.n} ช่อง ช่องละ ${GRID.cell} m รอบจุดที่เลือก`, `${GRID.n}×${GRID.n} grid of ${GRID.cell} m cells around the point`);
   let h = '';
   if (mapMode === 'km' || mapMode === 'rules') {
     const A = S.ndvi && S.ndvi.area;
@@ -609,7 +620,8 @@ async function demSampler(lat, lon) {
   const el = (X, Y) => { X = Math.max(0, Math.min(767, Math.round(X))); Y = Math.max(0, Math.min(767, Math.round(Y))); const k = (Y * 768 + X) * 4; return px[k] * 256 + px[k + 1] + px[k + 2] / 256 - 32768; };
   const res = 156543.03392 * Math.cos(r) / n;
   const toXY = (la, lo) => { const rr = la * Math.PI / 180; return [((lo + 180) / 360 * n - x0) * 256, ((1 - Math.log(Math.tan(rr) + 1 / Math.cos(rr)) / Math.PI) / 2 * n - y0) * 256]; };
-  const slope = (la, lo) => { const [X, Y] = toXY(la, lo); return Math.hypot((el(X + 1, Y) - el(X - 1, Y)) / (2 * res), (el(X, Y + 1) - el(X, Y - 1)) / (2 * res)) * 100; };
+  const elB = (X, Y) => { const x0 = Math.floor(X), y0 = Math.floor(Y), tx = X - x0, ty = Y - y0; return el(x0, y0) * (1 - tx) * (1 - ty) + el(x0 + 1, y0) * tx * (1 - ty) + el(x0, y0 + 1) * (1 - tx) * ty + el(x0 + 1, y0 + 1) * tx * ty; };
+  const slope = (la, lo) => { const [X, Y] = toXY(la, lo); return Math.hypot((elB(X + 1, Y) - elB(X - 1, Y)) / (2 * res), (elB(X, Y + 1) - elB(X, Y - 1)) / (2 * res)) * 100; };
   const samples = [], dLat = 125 / 111320 / 3, dLon = 125 / (111320 * Math.cos(r)) / 3;
   for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) samples.push(slope(lat + a * dLat, lon + b * dLon));
   return { slope, samples };
@@ -691,7 +703,7 @@ function setLoc() {
 }
 function applySite(site) {
   S = site; evKey = ''; recCache.key = ''; delete $('summary').dataset.err;
-  if (map) setGrid(liveGrid(S));
+  if (map) setGrid(gridFor(S));
   renderAll();
 }
 /* MODIS NDVI at the clicked pixel for the last year (ORNL DAAC web service; slow: ~30–60 s). Cloud-screened with pixel_reliability. */
@@ -758,7 +770,7 @@ async function gibsNdvi(site, ds, layer = 'MODIS_Terra_L3_NDVI_16Day') {
   return { nrows: w, ncols: w, nd, geo: { merc: { z, x0, y0 }, cell, src: 'gibs' } };
 }
 async function loadNdvi(site) {
-  const after = () => { if (site !== S) return; if (map) setGrid(liveGrid(S)); drawCharts(); ndviNote(); siBlock(); update(); };
+  const after = () => { if (site !== S) return; if (map) setGrid(gridFor(S)); drawCharts(); ndviNote(); siBlock(); update(); };
   if (site.ndvi || site.ndviFailed) { setStatus('ndvi', site.ndvi ? 'ok' : 'err', () => site.ndvi ? L2(RNAME[site.ndvi.cls]) : t('ดึงไม่ได้', 'failed')); after(); return; }
   setStatus('ndvi', 'load', '…'); if (site === S) { ndviNote(); siBlock(); }
   try {
@@ -1171,7 +1183,7 @@ function mapTools() {
   toolBox.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { if (drawing && drawing.mode === b.dataset.tool) { drawStop(); fieldUI(); } else drawStart(b.dataset.tool); });
   const tb = id => toolBox.querySelector('#' + id);
   if (tb('tDel')) tb('tDel').onclick = clearAll;
-  if (tb('tOnly')) tb('tOnly').onclick = () => { fieldOnly = !fieldOnly; recCache.key = ''; paintCells(); fieldUI(); };
+  if (tb('tOnly')) tb('tOnly').onclick = () => { fieldOnly = !fieldOnly; recCache.key = ''; setGrid(gridFor(S)); fieldUI(); };
   /* step-by-step bar */
   drawBar.hidden = !d;
   if (d) {
@@ -1194,9 +1206,9 @@ function setField(pts, analyse) {
   fieldLayer.bindTooltip(`${fmtArea(g.area)}<br>${t('รอบแปลง', 'perimeter')} ${fmtDist(pathLen(pts, true))}`, { permanent: true, direction: 'center', className: 'mlabel' });
   map.fitBounds(fieldLayer.getBounds(), { padding: [40, 40], maxZoom: 17 });
   const far = !S || Math.hypot((S.lat - g.lat) * 110540, (S.lon - g.lon) * g.kx) > 250;
-  if (analyse && far) loadLive(g.lat, g.lon); else { update(); paintCells(); }
+  if (analyse && far) loadLive(g.lat, g.lon); else { if (map && S) setGrid(gridFor(S)); update(); }
 }
-function fieldClear() { drawStop(); lastAreaPts = null; if (measureLayer) measureLayer.clearLayers(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; update(); paintCells(); }
+function fieldClear() { drawStop(); lastAreaPts = null; if (measureLayer) measureLayer.clearLayers(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; if (map && S) setGrid(gridFor(S)); update(); }
 function fieldExport() {
   if (!FIELD) return;
   const gj = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Field Shift Map field', area_m2: Math.round(FIELD.area) }, geometry: { type: 'Polygon', coordinates: [[...FIELD.pts, FIELD.pts[0]].map(p => [+p[1].toFixed(6), +p[0].toFixed(6)])] } }] };
@@ -1236,7 +1248,7 @@ function fieldInfo(st, ev, scores) {
   /* grid cells whose centre is inside the field */
   let cells = [];
   if (GRID) { GRID.info.forEach((ci, p) => { const r = Math.floor(p / GRID.n), c = p % GRID.n; if (inPoly(GRID.lat0 - (r + .5) * GRID.dLat, GRID.lon0 + (c + .5) * GRID.dLon, F.pts)) cells.push(ci); }); if (!cells.length) { const p = gridCell(F.lat, F.lon); if (p >= 0) cells.push(GRID.info[p]); } }
-  const A = S.ndvi && S.ndvi.area, hiRisk = cells.length && typeof riskBreaks !== 'undefined' ? cells.filter(ci => ci.farm && riskBreaksAll.filter(b => ci.risk > b).length >= 3).length / cells.length : null;
+  const A = S.ndvi && S.ndvi.area, hiRisk = cells.length && typeof riskBreaks !== 'undefined' ? cells.filter(ci => ci.farm && ci.slope > 5).length / cells.length : null;
   let pat = '—';
   if (A && cells.length) { const cnt = {}; cells.forEach(ci => { if (ci.fr >= 0) cnt[ci.fr] = (cnt[ci.fr] || 0) + 1; }); const tot = Object.values(cnt).reduce((a, b) => a + b, 0); if (tot) pat = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${L2(RNAME[k])} ${Math.round(v / tot * 100)}%`).join(' · '); }
   const best = scores.indexOf(Math.max(...scores)), m3 = mm => Math.round(mm * F.area / 1000).toLocaleString();
@@ -1246,7 +1258,7 @@ function fieldInfo(st, ev, scores) {
   $('fieldBody').innerHTML = `<div class="tiles">
       <div>${t('พื้นที่', 'Area')}<b>${rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1)} ${t('ไร่', 'rai')}</b>${ha.toFixed(2)} ha · ${t('กลางแปลง', 'centre')} ${fmtLL(F.lat, F.lon)}</div>
       <div>${t('ความลาดชันในแปลง', 'Slope inside the field')}<b>${sl.length ? (sl.reduce((a, b) => a + b, 0) / sl.length).toFixed(1) + '%' : '—'}</b>${sl.length ? t('สูงสุด ', 'max ') + Math.max(...sl).toFixed(1) + '% · ' + sl.length + t(' จุด (SRTM 30 m)', ' samples (SRTM 30 m)') : t('ไม่มีข้อมูลความสูง', 'no elevation data')}</div>
-      <div>${t('ช่องที่เสี่ยงดินพังสูง', 'Cells at high erosion risk')}<b>${hiRisk == null ? '—' : Math.round(hiRisk * 100) + '%'}</b>${cells.length} ${t('ช่อง 30 m ในแปลง · เทียบกับกริด 4 km รอบจุด', 'cells of 30 m in the field · relative to the 4 km grid around the point')}</div>
+      <div>${t('พื้นที่ที่ชันเกิน 5%', 'Area steeper than 5%')}<b>${hiRisk == null ? '—' : Math.round(hiRisk * 100) + '%'}</b>${cells.length} ${t(`ช่อง ${GRID.cell} m ในแปลง`, `cells of ${GRID.cell} m in the field`)}</div>
       <div>${t('รูปแบบพืชพรรณ (กฎ)', 'Vegetation pattern (rules)')}<b style="font-size:.9rem">${pat}</b>MODIS 250 m</div>
     </div>
     <div class="tbl" style="margin-top:10px"><table class="cmp"><thead><tr><th>${t('น้ำที่ต้องเติมทั้งแปลง (m³ ต่อปี)', 'Irrigation water for the whole field (m³ per year)')}</th><th>${t('ปีปกติ', 'Average year')}</th><th>${t('ปีแล้ง 1 ใน 5', '1-in-5 dry year')}</th></tr></thead><tbody>

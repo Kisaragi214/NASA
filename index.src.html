@@ -254,6 +254,16 @@ table.cmp th{vertical-align:bottom;min-width:92px}
     <p class="note"><span class="th">ไม่มีชลประทาน: คะแนนน้ำใช้ "ปีแล้ง 1 ใน 5 ปี" แทนค่าเฉลี่ย</span><span class="en">Without irrigation, the water score uses the 1-in-5 dry year instead of the average</span></p>
   </div>
   <div>
+    <h2><span class="th">ผลตรวจดินของแปลง (ถ้ามี)</span><span class="en">Your soil test (if you have one)</span></h2>
+    <div class="row" style="align-items:flex-end">
+      <div class="ctl" style="flex:1;min-width:80px"><label for="uPh">pH</label><input id="uPh" type="number" min="3" max="10" step="0.1" inputmode="decimal" placeholder="—"></div>
+      <div class="ctl" style="flex:1;min-width:80px"><label for="uOm"><span><span class="th">อินทรียวัตถุ %</span><span class="en">Organic matter %</span></span></label><input id="uOm" type="number" min="0" max="15" step="0.1" inputmode="decimal" placeholder="—"></div>
+    </div>
+    <div class="ctl" style="margin-top:8px"><label for="uTex"><span><span class="th">เนื้อดิน</span><span class="en">Soil texture</span></span></label><select id="uTex"></select></div>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn" id="uApply"><span class="th">ใช้ค่าดินนี้</span><span class="en">Use these values</span></button><button type="button" class="btn" id="uClear"><span class="th">กลับไปใช้ SoilGrids</span><span class="en">Back to SoilGrids</span></button></div>
+    <p class="note" id="uNote"></p>
+  </div>
+  <div>
     <h2><span class="th">Scenario อากาศ</span><span class="en">Climate scenario</span></h2>
     <div style="display:flex;flex-direction:column;gap:10px">
       <div class="ctl"><label for="sRain"><span><span class="th">ฝนรายปี</span><span class="en">Annual rainfall</span></span><output id="oRain">0%</output></label><input id="sRain" type="range" min="-30" max="30" step="5" value="0"></div>

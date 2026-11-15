@@ -58,8 +58,8 @@ const charts = {};
 
 /* ---------- model ---------- */
 const pct = (arr, q) => { const a = [...arr].sort((x, y) => x - y); const i = (a.length - 1) * q; const lo = Math.floor(i), hi = Math.ceil(i); return a[lo] + (a[hi] - a[lo]) * (i - lo); };
-function evalMonths(r, P, ET, HOT) {
-  let deficit = 0, use = 0, heat = 0, eroNum = 0, eroDen = 0, bare = 0, store = S.soil.deepStore, phPen = 0, months = 0;
+function evalMonths(r, P, ET, HOT, HV = new Array(12).fill(0)) {
+  let heavyBare = 0, deficit = 0, use = 0, heat = 0, eroNum = 0, eroDen = 0, bare = 0, store = S.soil.deepStore, phPen = 0, months = 0;
   const fams = new Set();
   for (let i = 0; i < 12; i++) {
     const c = r.m[i]; const kc = c ? c[1] : 0; const cover = c ? Math.min(1, 0.25 + 0.7 * kc) : 0;
@@ -70,14 +70,14 @@ function evalMonths(r, P, ET, HOT) {
       use += ET[i] * kc; deficit += d; heat += HOT[i] * cr.sens;
       const ph = S.soil.ph; phPen += ph < cr.ph[0] ? cr.ph[0] - ph : ph > cr.ph[1] ? ph - cr.ph[1] : 0;
     } else bare++;
-    eroNum += P[i] * (1 - cover); eroDen += P[i];
+    eroNum += P[i] * (1 - cover); eroDen += P[i]; heavyBare += HV[i] * (1 - cover);
   }
-  return { deficit, use, heat, erosion: eroNum / eroDen, bare, fams: [...fams], phPen: months ? Math.min(.2, phPen / months) : 0 };
+  return { deficit, use, heat, heavyBare, erosion: eroNum / eroDen, bare, fams: [...fams], phPen: months ? Math.min(.2, phPen / months) : 0 };
 }
 function evalRot(r, rf, dT) {
   const adj = rows => ({ P: rows.map(x => x[0] * (1 + rf)), ET: rows.map(x => x[1] * (1 + 0.022 * dT)), H: rows.map(x => Math.min(30, x[2] * (1 + 0.3 * dT))) });
   const c = adj(S.clim.map(x => [x[0], x[1], x[3]]));
-  const base = evalMonths(r, c.P, c.ET, c.H);
+  const base = evalMonths(r, c.P, c.ET, c.H, extremes().heavyM.map(v => v * (1 + rf)));
   const yrs = Object.values(S.yearly).map(rows => { const a = adj(rows); return evalMonths(r, a.P, a.ET, a.H); });
   const defs = yrs.map(y => y.deficit);
   base.defMean = defs.reduce((a, b) => a + b, 0) / defs.length;
@@ -264,7 +264,7 @@ function setLang(l) {
   if (S.recentJSON) loadRecent(S);
   $('liveList').innerHTML = liveStatusHTML(); restoreStatus();
 }
-function renderAll() { update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); ndviNote(); siBlock(); }
+function renderAll() { soilUI(); update(); drawCharts(); trends(); soilTiles(); paintCells(); links(); setLoc(); ndviNote(); siBlock(); }
 
 /* ---------- render ---------- */
 function update() {
@@ -533,11 +533,23 @@ function drawCharts() {
 function sen(xs, ys) { const s = []; for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) s.push((ys[j] - ys[i]) / (xs[j] - xs[i])); return pct(s, .5); }
 function erfc(x) { const z = 1 / (1 + .5 * x); return z * Math.exp(-x * x - 1.26551223 + z * (1.00002368 + z * (.37409196 + z * (.09678418 + z * (-.18628806 + z * (.27886807 + z * (-1.13520398 + z * (1.48851587 + z * (-.82215223 + z * .17087277))))))))); }
 function mk(ys) { const n = ys.length; let s = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) s += Math.sign(ys[j] - ys[i]); const v = n * (n - 1) * (2 * n + 5) / 18; return erfc(Math.abs((s - Math.sign(s)) / Math.sqrt(v)) / Math.SQRT2); }
+/* Heavy-rain days (≥ 50 mm) and the longest dry spell inside the six wettest months, per year */
+function extremes() {
+  if (S.ext) return S.ext;
+  const wet = S.clim.map((c, m) => [c[0], m]).sort((a, b) => b[0] - a[0]).slice(0, 6).map(x => x[1]), isWet = new Set(wet);
+  const yrs = {}, heavyM = new Array(12).fill(0);
+  for (const d of S.days) { const y = yrs[d.y] || (yrs[d.y] = { heavy: 0, run: 0, dry: 0 }); if (d.p >= 50) { y.heavy++; heavyM[d.m]++; }
+    if (isWet.has(d.m)) { if (d.p < 1) { y.run++; if (y.run > y.dry) y.dry = y.run; } else y.run = 0; } }
+  const ys = Object.keys(yrs).map(Number).sort((a, b) => a - b);
+  return S.ext = { years: ys, heavy: ys.map(y => yrs[y].heavy), dry: ys.map(y => yrs[y].dry), heavyM: heavyM.map(v => v / ys.length) };
+}
 function trends() {
   const xs = S.annual.map(a => a[0]);
   const items = [[t('ฝนรายปี', 'Annual rain'), 1, t('mm/ทศวรรษ', 'mm/decade'), 0], [t('Tmax เฉลี่ย', 'Mean Tmax'), 2, t('°C/ทศวรรษ', '°C/decade'), 2], [t('วันร้อน ≥35 °C', 'Days ≥35 °C'), 3, t('วัน/ทศวรรษ', 'days/decade'), 0], [t('ฝน ม.ค.–เม.ย.', 'Jan–Apr rain'), 4, t('mm/ทศวรรษ', 'mm/decade'), 0]];
   $('trend').innerHTML = items.map(([n, i, u, dp]) => { const ys = S.annual.map(a => a[i]); const s = sen(xs, ys) * 10, p = mk(ys);
-    return `<div>${n}<b>${s >= 0 ? '+' : ''}${s.toFixed(dp)} ${u}</b><span class="pill ${p < .05 ? 'sig' : 'ns'}">p=${p.toFixed(2)} ${p < .05 ? t('มีนัยสำคัญ', 'significant') : t('ไม่ชัด', 'not significant')}</span></div>`; }).join('');
+    return `<div>${n}<b>${s >= 0 ? '+' : ''}${s.toFixed(dp)} ${u}</b><span class="pill ${p < .05 ? 'sig' : 'ns'}">p=${p.toFixed(2)} ${p < .05 ? t('มีนัยสำคัญ', 'significant') : t('ไม่ชัด', 'not significant')}</span></div>`; }).join('')
+    + (() => { const E = extremes(), m = a => a.reduce((x, y) => x + y, 0) / a.length; return [[t('วันฝนหนัก ≥50 mm', 'Heavy-rain days ≥50 mm'), E.heavy, t('วัน/ปี', 'days/yr'), t('วัน/ทศวรรษ', 'days/decade')], [t('ช่วงฝนทิ้งยาวสุดในฤดูฝน', 'Longest dry spell in the wet season'), E.dry, t('วัน', 'days'), t('วัน/ทศวรรษ', 'days/decade')]].map(([n, ys, u0, u]) => { const s = sen(E.years, ys) * 10, p = mk(ys);
+      return `<div>${n}<b>${m(ys).toFixed(1)} ${u0}</b>${t('แนวโน้ม', 'trend')} ${s >= 0 ? '+' : ''}${s.toFixed(1)} ${u} <span class="pill ${p < .05 ? 'sig' : 'ns'}">p=${p.toFixed(2)}</span></div>`; }).join(''); })();
 }
 function soilTiles() {
   const sl = S.slopeSamples || []; const s = S.soil;
@@ -551,7 +563,7 @@ function soilTiles() {
     [t('น้ำที่พืชใช้ได้ 0–100 cm', 'Plant-available water 0–100 cm'), s.paw + ' mm', t(`ชั้นล่าง >45 cm ~${s.deepStore} mm`, `below 45 cm ~${s.deepStore} mm`)]
   ];
   if (sl.length) rows.push([t('ความลาดชัน (มัธยฐาน)', 'Slope (median)'), pct(sl, .5).toFixed(0) + '%', t(`ในรัศมี ~125 m · สูงสุด ${Math.max(...sl).toFixed(0)}%`, `within ~125 m · max ${Math.max(...sl).toFixed(0)}%`)]);
-  $('soilTiles').innerHTML = rows.map(([a, b, c]) => `<div>${a}<b>${b}</b>${c}</div>`).join('') + (S.soilFallback ? `<div>${t('หมายเหตุ', 'Note')}<b class="d">${t('ค่าดินเป็นค่าสมมติ', 'Soil values are assumed')}</b>${t('SoilGrids ไม่มีค่าที่จุดนี้ (เช่น เป็นน้ำหรือเมือง) จึงใช้ค่ากลางๆ แทน ควรตรวจดินจริง', 'SoilGrids has no value here (e.g. water or urban), so mid-range values are used; test the soil')}</div>` : '');
+  $('soilTiles').innerHTML = rows.map(([a, b, c]) => `<div>${a}<b>${b}</b>${c}</div>`).join('') + (S.soilUser ? `<div>${t('ที่มา', 'Source')}<b>${t('ผลตรวจดินของคุณ', 'Your soil test')}</b>${t('ค่าที่ไม่ได้กรอกมาจาก SoilGrids', 'blank values come from SoilGrids')}</div>` : '') + (S.soilFallback ? `<div>${t('หมายเหตุ', 'Note')}<b class="d">${t('ค่าดินเป็นค่าสมมติ', 'Soil values are assumed')}</b>${t('SoilGrids ไม่มีค่าที่จุดนี้ (เช่น เป็นน้ำหรือเมือง) จึงใช้ค่ากลางๆ แทน ควรตรวจดินจริง', 'SoilGrids has no value here (e.g. water or urban), so mid-range values are used; test the soil')}</div>` : '');
 }
 
 /* ---------- live NASA data (T1, T2) ---------- */
@@ -595,6 +607,42 @@ function buildClimate(param, lat) {
   return { days, clim, annual, yearly };
 }
 /* SoilGrids → soil props (port of soil_props in build_site.py; Saxton & Rawls 2006) */
+/* Saxton & Rawls (2006) plant-available water fraction for sand, clay (0–1) and organic matter (%) */
+const srPaw = (S_, C, OM) => { const t33 = -0.251*S_ + 0.195*C + 0.011*OM + 0.006*S_*OM - 0.027*C*OM + 0.452*S_*C + 0.299;
+  const t15 = -0.024*S_ + 0.487*C + 0.006*OM + 0.005*S_*OM - 0.013*C*OM + 0.068*S_*C + 0.031;
+  return Math.max(0, (t33 + 1.283*t33*t33 - 0.374*t33 - 0.015) - (t15 + 0.14*t15 - 0.02)); };
+const TEXTURE = { sand: { clay: 5, sand: 88, l: { th: 'ดินทราย', en: 'Sand' } }, sandyloam: { clay: 12, sand: 65, l: { th: 'ดินร่วนปนทราย', en: 'Sandy loam' } }, loam: { clay: 20, sand: 40, l: { th: 'ดินร่วน', en: 'Loam' } }, clayloam: { clay: 33, sand: 30, l: { th: 'ดินร่วนเหนียว', en: 'Clay loam' } }, clay: { clay: 50, sand: 20, l: { th: 'ดินเหนียว', en: 'Clay' } } };
+let USERSOIL = null; /* kept across points: it describes the farmer's own field */
+function applyUserSoil() {
+  if (!S) return;
+  if (!S.soilGrid) S.soilGrid = { ...S.soil, fallback: !!S.soilFallback };
+  const g = S.soilGrid, u = USERSOIL;
+  if (!u) { S.soil = { ...g }; delete S.soil.fallback; S.soilFallback = g.fallback; S.soilUser = false; return; }
+  const sl = { ...g }; delete sl.fallback;
+  if (u.ph != null) sl.ph = u.ph;
+  if (u.om != null) sl.om = u.om;
+  if (u.tex) { sl.clay = TEXTURE[u.tex].clay; sl.sand = TEXTURE[u.tex].sand; }
+  if (u.tex || u.om != null) { const f = srPaw(sl.sand / 100, sl.clay / 100, Math.min(sl.om, 8)); sl.paw = Math.round(f * 1000); sl.deepStore = Math.round(f * 550); }
+  S.soil = sl; S.soilFallback = false; S.soilUser = true;
+}
+function soilUI() {
+  const sel = $('uTex'); if (!sel) return;
+  const cur = USERSOIL && USERSOIL.tex || '';
+  sel.innerHTML = `<option value="">${t('ไม่รู้ / ใช้ค่าจาก SoilGrids', 'Not sure / use SoilGrids')}</option>` + Object.entries(TEXTURE).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${L2(v.l)}</option>`).join('');
+  const g = S && (S.soilGrid || S.soil);
+  if (g) { $('uPh').placeholder = 'SoilGrids ' + g.ph; $('uOm').placeholder = 'SoilGrids ~' + g.om; }
+  $('uNote').innerHTML = USERSOIL ? t('<b>ใช้ผลตรวจดินของคุณอยู่</b> ค่าที่ไม่ได้กรอกยังมาจาก SoilGrids · คัดพืช คะแนนดิน และน้ำที่ดินเก็บได้คิดใหม่ทั้งหมด', '<b>Using your soil test.</b> Values you left blank still come from SoilGrids · crop screening, soil scores and soil water are all recalculated') : t('ค่าดินตอนนี้มาจาก SoilGrids (แผนที่ดินระดับโลก 250 m) ถ้ามีผลตรวจดินของแปลงจริง กรอกที่นี่จะแม่นกว่า', 'Soil values now come from SoilGrids (a global 250 m soil map). If you have a soil test for the field, entering it here is more accurate');
+}
+function soilApply(clear) {
+  if (clear) { USERSOIL = null; $('uPh').value = ''; $('uOm').value = ''; $('uTex').value = ''; }
+  else {
+    const num = (id, lo, hi) => { const v = parseFloat($(id).value); return isNaN(v) ? null : Math.max(lo, Math.min(hi, v)); };
+    const u = { ph: num('uPh', 3, 10), om: num('uOm', 0, 15), tex: $('uTex').value || null };
+    USERSOIL = u.ph == null && u.om == null && !u.tex ? null : u;
+  }
+  if (!S) { soilUI(); return; }
+  applyUserSoil(); planKey = ''; evKey = ''; recCache.key = ''; renderAll(); soilUI();
+}
 function soilFromGrids(j) {
   const lay = {};
   for (const l of j.properties.layers) lay[l.name] = l.depths.map(d => d.values.mean == null ? null : d.values.mean / l.unit_measure.d_factor);
@@ -690,7 +738,7 @@ async function loadLive(lat, lon) {
     else { soil = { ...SOIL_DEFAULT }; soilFallback = true;
       if (sgv === undefined) { setStatus('soil', 'load', () => t('ช้า ใช้ค่าสมมติไปก่อน', 'slow; assumed for now'));
         soilP.then(s2 => { const st0 = liveCache.get(key); if (!st0) return;
-          if (s2) { st0.soil = s2; st0.soilFallback = false; if (st0 === S) { setStatus('soil', 'ok', 'pH ' + s2.ph); planKey = ''; evKey = ''; renderAll(); } }
+          if (s2) { st0.soil = s2; st0.soilFallback = false; st0.soilGrid = { ...s2, fallback: false }; if (st0 === S) applyUserSoil(); if (st0 === S) { setStatus('soil', 'ok', 'pH ' + s2.ph); planKey = ''; evKey = ''; renderAll(); } }
           else if (st0 === S) setStatus('soil', 'err', () => t('ไม่มีค่า ใช้ค่าสมมติ', 'no value; assumed')); });
       } else setStatus('soil', 'err', () => t('ไม่มีค่า ใช้ค่าสมมติ', 'no value; assumed')); }
     const dem = slp.status === 'fulfilled' ? slp.value : null, slopeSamples = dem ? dem.samples : [];
@@ -708,7 +756,7 @@ function setLoc() {
   $('liveTitle').textContent = t(`จุด ${fmtLL(S.lat, S.lon)} · ดึงเมื่อ ${S.fetched}`, `Point ${fmtLL(S.lat, S.lon)} · fetched ${S.fetched}`);
 }
 function applySite(site) {
-  S = site; evKey = ''; recCache.key = ''; delete $('summary').dataset.err;
+  S = site; applyUserSoil(); evKey = ''; recCache.key = ''; delete $('summary').dataset.err;
   if (map) setGrid(gridFor(S));
   renderAll();
 }
@@ -1033,6 +1081,7 @@ function compareTable(st, ev, soil, scores, scrBy) {
     [t('ปีที่ขาดน้ำเกิน 150 mm', 'Years short > 150 mm'), i => ev[i].dryYears, v => v, false],
     [t('วันร้อน ≥35 °C ตอนมีพืช', 'Days ≥35 °C with crop'), i => ev[i].heat, v => (+v).toFixed(1), false],
     [t('ฝนที่ตกตอนดินโล่ง', 'Rain falling on bare soil'), i => ev[i].erosion * 100, v => Math.round(v) + '%', false],
+    [t('วันฝนหนัก ≥50 mm ตอนดินโล่ง (วัน/ปี)', 'Heavy-rain days ≥50 mm on bare soil (per yr)'), i => ev[i].heavyBare, v => (+v).toFixed(1), false],
     [t('เดือนที่แปลงว่าง', 'Idle months'), i => ev[i].bare, v => v, false],
     [t('สุขภาพดิน (0–100)', 'Soil health (0–100)'), i => soil[i] * 100, v => Math.round(v), true],
     [t('เพิ่มอินทรียวัตถุ (0–100)', 'Organic-matter gain (0–100)'), i => R[i].om * 100, v => Math.round(v), true],
@@ -1302,7 +1351,8 @@ $('geoBtn').onclick = () => {
     () => { $('coordMsg').textContent = t('ไม่ได้รับอนุญาตให้ใช้ตำแหน่ง พิมพ์พิกัดหรือคลิกแผนที่แทน', 'Location not allowed; type coordinates or click the map instead'); }, { timeout: 15000, maximumAge: 600000 });
 };
 document.body.dataset.lang = LANG;
-setLang(LANG); initMap(); fieldUI();
+setLang(LANG); initMap(); fieldUI(); soilUI();
+$('uApply').onclick = () => soilApply(false); $('uClear').onclick = () => soilApply(true);
 $('liveList').innerHTML = liveStatusHTML();
 { const mq = matchMedia('(prefers-color-scheme: dark)'), root = document.documentElement, btn = $('themeBtn');
   const isDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : mq.matches;

@@ -156,7 +156,7 @@ function liveGrid(site, n = 133, cell = 30, ctr = null) {
 function gridFor(site) {
   if (FIELD && fieldOnly) {
     const las = FIELD.pts.map(p => p[0]), los = FIELD.pts.map(p => p[1]), la0 = Math.min(...las), la1 = Math.max(...las), lo0 = Math.min(...los), lo1 = Math.max(...los);
-    const side = Math.max((la1 - la0) * 111320, (lo1 - lo0) * 111320 * Math.cos(FIELD.lat * Math.PI / 180)), cell = Math.max(5, Math.min(30, Math.ceil(side * 1.06 / 133)));
+    const side = Math.max((la1 - la0) * 111320, (lo1 - lo0) * 111320 * Math.cos(FIELD.lat * Math.PI / 180)), cell = Math.max(5, Math.ceil(side * 1.06 / 133));
     return liveGrid(site, 133, cell, [(la0 + la1) / 2, (lo0 + lo1) / 2]);
   }
   return liveGrid(site);
@@ -683,8 +683,9 @@ function soilFromGrids(j) {
   return { ph: +w(lay.phh2o).toFixed(2), om: +(w(lay.soc) / 10 * 1.72).toFixed(2), clay: Math.round(w(lay.clay)), sand: Math.round(w(lay.sand)), paw: Math.round(paw.reduce((a, b) => a + b, 0)), deepStore: Math.round(paw[4] + 0.5 * paw[3]) };
 }
 /* DEM sampler around a point from SRTM-derived terrain tiles (terrarium, zoom 13, 3×3 tiles ≈ ±7 km). slope(la, lo) → % */
-async function demSampler(lat, lon) {
-  const z = 13, n = 2 ** z, fx = (lon + 180) / 360 * n, r = lat * Math.PI / 180, fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
+async function demSampler(lat, lon, reach = 2000) {
+  /* 3×3 terrain tiles around the point: zoom 13 (~5 km tiles) normally, coarser for a big field so the tiles still cover it */
+  const tileM = 40075016 * Math.cos(lat * Math.PI / 180), z = Math.max(10, Math.min(13, Math.floor(Math.log2(tileM / (reach * 1.1))))), n = 2 ** z, fx = (lon + 180) / 360 * n, r = lat * Math.PI / 180, fy = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
   const x0 = Math.floor(fx) - 1, y0 = Math.floor(fy) - 1, cv = document.createElement('canvas'); cv.width = cv.height = 768;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   await Promise.all([0, 1, 2].flatMap(i => [0, 1, 2].map(j => new Promise((ok, no) => {
@@ -733,9 +734,9 @@ function onMapClick(e) {
   box.append(head, infoEl, btn);
   L.popup().setLatLng(e.latlng).setContent(box).openOn(map);
 }
-async function loadLive(lat, lon) {
+async function loadLive(lat, lon, reach = 2000) {
   lon = ((lon + 540) % 360) - 180;
-  const seq = ++loadSeq, key = lat.toFixed(3) + ',' + lon.toFixed(3);
+  const seq = ++loadSeq, key = lat.toFixed(3) + ',' + lon.toFixed(3) + '|' + Math.ceil(reach / 1000);
   for (const k in statusMem) delete statusMem[k];
   $('liveList').innerHTML = liveStatusHTML(); $('retryBtn').hidden = true;
   $('liveTitle').textContent = t(`กำลังดึงข้อมูลของ ${fmtLL(lat, lon)}…`, `Fetching data for ${fmtLL(lat, lon)}…`);
@@ -746,7 +747,7 @@ async function loadLive(lat, lon) {
     ['power', 'soil', 'slope'].forEach(k => setStatus(k, 'load', '…'));
     /* SoilGrids is often slow: it gets 5 s, then the page goes on with assumed soil and updates when the answer arrives */
     const soilP = getJSON(`https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon.toFixed(4)}&lat=${lat.toFixed(4)}&property=phh2o&property=soc&property=clay&property=sand&depth=0-5cm&depth=5-15cm&depth=15-30cm&depth=30-60cm&depth=60-100cm&value=mean`, 45000).then(soilFromGrids).catch(() => null);
-    const [pw, slp] = await Promise.allSettled([getJSON(powerURL(lat, lon, '20010101', '20251231'), 60000), demSampler(lat, lon)]);
+    const [pw, slp] = await Promise.allSettled([getJSON(powerURL(lat, lon, '20010101', '20251231'), 60000), demSampler(lat, lon, reach)]);
     const sgv = await Promise.race([soilP, new Promise(r => setTimeout(() => r(undefined), 5000))]);
     if (seq !== loadSeq) return;
     let cl = null;
@@ -769,7 +770,7 @@ async function loadLive(lat, lon) {
       } else setStatus('soil', 'err', () => t('ไม่มีค่า ใช้ค่าสมมติ', 'no value; assumed')); }
     const dem = slp.status === 'fulfilled' ? slp.value : null, slopeSamples = dem ? dem.samples : [];
     setStatus('slope', slopeSamples.length ? 'ok' : 'err', slopeSamples.length ? pct(slopeSamples, .5).toFixed(0) + '%' : () => t('ดึงไม่ได้', 'failed'));
-    site = { lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, et: cl.et, soil, soilFallback, slopeSamples, dem, fetched: isoDay(Date.now()) };
+    site = { lat, lon, reach, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, et: cl.et, soil, soilFallback, slopeSamples, dem, fetched: isoDay(Date.now()) };
     liveCache.set(key, site);
   } else { setStatus('power', 'ok', () => t('จากแคช', 'cached')); setStatus('soil', site.soilFallback ? 'err' : 'ok', 'pH ' + site.soil.ph); setStatus('slope', site.slopeSamples.length ? 'ok' : 'err', ''); }
   applySite(site);
@@ -828,7 +829,7 @@ async function gibsNdvi(site, ds, layer = 'MODIS_Terra_L3_NDVI_16Day') {
   if (Math.abs(site.lat) > 80) throw new Error('latitude');
   const cm = await gibsColormap(), z = 9, n = 256 * 2 ** z, la = site.lat * Math.PI / 180;
   const gx = (site.lon + 180) / 360 * n, gy = (1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * n;
-  const cell = 40075016.686 / n * Math.cos(la), hw = Math.max(4, Math.min(12, Math.ceil(2000 / cell)));
+  const cell = 40075016.686 / n * Math.cos(la), hw = Math.max(4, Math.min(48, Math.ceil((site.reach || 2000) / cell)));
   const x0 = Math.floor(gx) - hw, y0 = Math.floor(gy) - hw, w = 2 * hw + 1, tiles = [];
   for (let ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + w - 1) / 256); ty++) for (let tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + w - 1) / 256); tx++) if (tx >= 0 && ty >= 0 && tx < 2 ** z && ty < 2 ** z) tiles.push([tx, ty]);
   const dec = (r, g, b, a) => {
@@ -862,7 +863,7 @@ async function loadNdvi(site) {
     else {
       if (site === S) setStatus('ndvi', 'load', () => t('~1 นาที (ORNL)', '~1 min (ORNL)'));
       const chunks = []; for (let i = 0; i < ds.length; i += 10) chunks.push(ds.slice(i, i + 10));
-      const url = (band, ch) => `https://modis.ornl.gov/rst/api/v1/MOD13Q1/subset?latitude=${site.lat.toFixed(5)}&longitude=${site.lon.toFixed(5)}&band=${band}&startDate=${ch[0].a}&endDate=${ch.at(-1).a}&kmAboveBelow=2&kmLeftRight=2`;
+      const url = (band, ch) => `https://modis.ornl.gov/rst/api/v1/MOD13Q1/subset?latitude=${site.lat.toFixed(5)}&longitude=${site.lon.toFixed(5)}&band=${band}&startDate=${ch[0].a}&endDate=${ch.at(-1).a}&kmAboveBelow=${Math.min(8, Math.ceil((site.reach || 2000) / 1000))}&kmLeftRight=${Math.min(8, Math.ceil((site.reach || 2000) / 1000))}`;
       const one = async (band, ch) => { for (let a = 0; a < 2; a++) { try { const j = await getJSON(url(band, ch), 90000, { headers: { Accept: 'application/json' } }); if (j && j.subset) return j; } catch (e) { } } return null; };
       const get = band => Promise.all(chunks.map(ch => one(band, ch))).then(a => a.filter(Boolean));
       const ndJ = await get('250m_16_days_NDVI');
@@ -902,11 +903,12 @@ async function loadNdvi(site) {
     const rule = px.map(q => q.smooth ? classifyNdvi(q.smooth) : -1), valid = px.map((q, p) => q.smooth ? p : -1).filter(p => p >= 0);
     const area = { nrows, ncols, ...geo, prof: px.map(q => q.smooth), rule, loose: px.filter(q => q.loose).length, km: new Array(N).fill(null), lowNd: px.map(q => q.smooth ? lowOf(q.smooth) : null), k: 0, cents: [], agree: null, valid: valid.length, noQA: !rel };
     /* k from the data: try 2..8 and stop when one more group no longer cuts the within-group spread by 8 % of the k=2 spread */
-    const kMax = Math.min(8, Math.floor(valid.length / 8)), X = valid.map(p => px[p].smooth); let k = 0, res = null;
+    const kMax = Math.min(8, Math.floor(valid.length / 8)), step = Math.max(1, Math.ceil(valid.length / 2500)), X = valid.filter((_, i) => i % step === 0).map(p => px[p].smooth); let k = 0, res = null;
     if (kMax >= 2) { const runs = []; for (let q = 2; q <= kMax; q++) runs[q] = kmeans(X, q, 4); k = kMax; for (let q = 3; q < kMax; q++) if ((runs[q].sse - runs[q + 1].sse) < 0.08 * runs[2].sse) { k = q; break; } if (kMax < 3) k = kMax; res = runs[k]; area.kTried = kMax; }
     if (k >= 2) {
       const ord = res.C.map((c, i) => [c.reduce((a, b) => a + b, 0) / c.length, i]).sort((a, b) => b[0] - a[0]).map(x => x[1]), pos = []; ord.forEach((o, i) => pos[o] = i);
-      valid.forEach((p, i) => area.km[p] = pos[res.lab[i]]);
+      const nearest = v => { let b = 0, bd = 1e18; res.C.forEach((c, j) => { let d = 0; for (let q = 0; q < v.length; q++) { const e = v[q] - c[q]; d += e * e; } if (d < bd) { bd = d; b = j; } }); return b; };
+      valid.forEach(p => area.km[p] = pos[nearest(px[p].smooth)]);
       area.cents = ord.map(o => { const c = res.C[o], mm = monthMean(c), lo = mm.map((v, m) => [v, m]).filter(q => !isNaN(q[0])).sort((a, b) => a[0] - b[0])[0][1]; return { prof: c.map(v => +v.toFixed(3)), mean: c.reduce((a, b) => a + b, 0) / c.length, amp: Math.max(...c) - Math.min(...c), lowM: lo, rule: classifyNdvi(c) }; });
       let agreeN = 0; for (let c = 0; c < k; c++) { const cnt = new Array(RNAME.length).fill(0); valid.forEach(p => { if (area.km[p] === c) cnt[rule[p]]++; }); agreeN += Math.max(...cnt); }
       area.k = k; area.agree = agreeN / valid.length; area.sse = res.sse;
@@ -1222,7 +1224,7 @@ async function loadRecent(site) {
 
 /* ---------- field polygon: draw your own field (T5) ---------- */
 let FIELD = null, drawing = null, fieldLayer = null, fieldMsg = null;
-const FIELD_MAX = 25e6, MODIS_PX = 62500;
+const FIELD_MAX = 400e6, MODIS_PX = 62500;
 function polyGeom(pts) {
   const la0 = pts.reduce((a, p) => a + p[0], 0) / pts.length * Math.PI / 180, kx = 111320 * Math.cos(la0), ky = 110540;
   const xy = pts.map(p => [(p[1] - pts[0][1]) * kx, (p[0] - pts[0][0]) * ky]); let a = 0, cx = 0, cy = 0;
@@ -1305,14 +1307,18 @@ function mapTools() {
 function setField(pts, analyse) {
   const g = polyGeom(pts);
   if (g.area < 100) { fieldMsg = { th: 'แปลงเล็กเกินไปหรือจุดซ้อนกัน ลองวาดใหม่', en: 'The shape is too small or the points overlap; draw again' }; fieldUI(); return; }
-  if (g.area > FIELD_MAX) { fieldMsg = { th: `พื้นที่ ${(g.area / 1e6).toFixed(1)} km² ใหญ่เกิน 25 km² · ข้อมูลอากาศจุดเดียวใช้แทนพื้นที่ขนาดนี้ไม่ได้ วาดให้เล็กลง`, en: `${(g.area / 1e6).toFixed(1)} km² is over the 25 km² limit · one climate point cannot stand for an area this large; draw a smaller field` }; fieldUI(); return; }
-  FIELD = { pts, area: g.area, lat: g.lat, lon: g.lon }; fieldMsg = null;
+  if (g.area > FIELD_MAX) { fieldMsg = { th: `พื้นที่ ${(g.area / 1e6).toFixed(1)} km² ใหญ่เกิน 400 km² (ราว 250,000 ไร่) · ข้อมูลอากาศจุดเดียวใช้แทนพื้นที่ขนาดนี้ไม่ได้ วาดให้เล็กลง`, en: `${(g.area / 1e6).toFixed(1)} km² is over the 400 km² limit · one climate point cannot stand for an area this large; draw a smaller field` }; fieldUI(); return; }
+  { const las = pts.map(p => p[0]), los = pts.map(p => p[1]), side = Math.max((Math.max(...las) - Math.min(...las)) * 110540, (Math.max(...los) - Math.min(...los)) * g.kx);
+    if (side > 22000) { fieldMsg = { th: `ด้านที่ยาวที่สุด ${(side / 1000).toFixed(1)} km ยาวเกิน 22 km · วาดให้กระชับขึ้น หรือแบ่งเป็นหลายแปลง`, en: `The longest side is ${(side / 1000).toFixed(1)} km, over 22 km · draw a more compact shape or split it into several fields` }; fieldUI(); return; } }
+  FIELD = { pts, area: g.area, lat: g.lat, lon: g.lon }; fieldMsg = null; fieldOnly = true;
   if (fieldLayer) map.removeLayer(fieldLayer);
   fieldLayer = L.polygon(pts, { color: '#ffffff', weight: 3, fillColor: '#ffffff', fillOpacity: .08, interactive: false }).addTo(map);
   fieldLayer.bindTooltip(`${fmtArea(g.area)}<br>${t('รอบแปลง', 'perimeter')} ${fmtDist(pathLen(pts, true))}`, { permanent: true, direction: 'center', className: 'mlabel' });
   map.fitBounds(fieldLayer.getBounds(), { padding: [40, 40], maxZoom: 17 });
-  const far = !S || Math.hypot((S.lat - g.lat) * 110540, (S.lon - g.lon) * g.kx) > 250;
-  if (analyse && far) loadLive(g.lat, g.lon); else { if (map && S) setGrid(gridFor(S)); update(); }
+  const las = pts.map(p => p[0]), los = pts.map(p => p[1]), half = Math.max((Math.max(...las) - Math.min(...las)) * 110540, (Math.max(...los) - Math.min(...los)) * g.kx) / 2;
+  const reach = Math.max(2000, Math.min(12000, Math.ceil((half * 1.1 + 300) / 1000) * 1000));
+  const far = !S || Math.hypot((S.lat - g.lat) * 110540, (S.lon - g.lon) * g.kx) > 250 || reach > (S.reach || 2000);
+  if (analyse && far) loadLive(g.lat, g.lon, reach); else { if (map && S) setGrid(gridFor(S)); update(); }
 }
 function fieldClear() { drawStop(); lastAreaPts = null; if (measureLayer) measureLayer.clearLayers(); if (fieldLayer) { map.removeLayer(fieldLayer); fieldLayer = null; } FIELD = null; fieldMsg = null; if (map && S) setGrid(gridFor(S)); update(); }
 function fieldExport() {
@@ -1359,6 +1365,7 @@ function fieldInfo(st, ev, scores) {
   if (A && cells.length) { const cnt = {}; cells.forEach(ci => { if (ci.fr >= 0) cnt[ci.fr] = (cnt[ci.fr] || 0) + 1; }); const tot = Object.values(cnt).reduce((a, b) => a + b, 0); if (tot) pat = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${L2(RNAME[k])} ${Math.round(v / tot * 100)}%`).join(' · '); }
   const best = scores.indexOf(Math.max(...scores)), m3 = mm => Math.round(mm * F.area / 1000).toLocaleString();
   const warn = [];
+  if (F.area > 25e6) warn.push(t(`พื้นที่ใหญ่ (${(F.area / 1e6).toFixed(0)} km²): อากาศ (~50 km) และดินเป็นค่าของจุดกลางพื้นที่ ส่วนที่อยู่ไกลอาจต่างออกไป ช่องบนแผนที่ละเอียด ${GRID ? GRID.cell : '—'} m`, `Large area (${(F.area / 1e6).toFixed(0)} km²): climate (~50 km) and soil are taken at the centre, so far parts may differ · map cells are ${GRID ? GRID.cell : '—'} m`));
   if (F.area < MODIS_PX) warn.push(t(`แปลงเล็กกว่า pixel ดาวเทียม MODIS 1 ช่อง (6.25 ha ≈ 39 ไร่): NDVI และรูปแบบพืชพรรณที่เห็นรวมแปลงข้างเคียงด้วย ใช้ดูแนวโน้มของละแวกนี้ ไม่ใช่ของแปลงนี้โดยเฉพาะ`, `The field is smaller than one MODIS satellite pixel (6.25 ha): the NDVI and vegetation pattern include neighbouring fields. Read them as the neighbourhood, not this field alone`));
   if (distKm > 0.5) warn.push(t(`อากาศและดินที่ใช้คำนวณเป็นของจุดที่วิเคราะห์ ซึ่งห่างจากกลางแปลง ${distKm.toFixed(1)} km`, `Climate and soil are for the analysed point, ${distKm.toFixed(1)} km from the field centre`) + ` <button type="button" class="btn" id="fRe">${t('วิเคราะห์ที่กลางแปลง', 'Analyse at the field centre')}</button>`);
   $('fieldBody').innerHTML = `<div class="tiles">

@@ -631,6 +631,7 @@ function soilUI() {
   sel.innerHTML = `<option value="">${t('ไม่รู้ / ใช้ค่าจาก SoilGrids', 'Not sure / use SoilGrids')}</option>` + Object.entries(TEXTURE).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${L2(v.l)}</option>`).join('');
   const g = S && (S.soilGrid || S.soil);
   if (g) { $('uPh').placeholder = 'SoilGrids ' + g.ph; $('uOm').placeholder = 'SoilGrids ~' + g.om; }
+  { const f = sel.closest('details.fold'); if (f && USERSOIL) f.open = true; }
   $('uNote').innerHTML = USERSOIL ? t('<b>ใช้ผลตรวจดินของคุณอยู่</b> ค่าที่ไม่ได้กรอกยังมาจาก SoilGrids · คัดพืช คะแนนดิน และน้ำที่ดินเก็บได้คิดใหม่ทั้งหมด', '<b>Using your soil test.</b> Values you left blank still come from SoilGrids · crop screening, soil scores and soil water are all recalculated') : t('ค่าดินตอนนี้มาจาก SoilGrids (แผนที่ดินระดับโลก 250 m) ถ้ามีผลตรวจดินของแปลงจริง กรอกที่นี่จะแม่นกว่า', 'Soil values now come from SoilGrids (a global 250 m soil map). If you have a soil test for the field, entering it here is more accurate');
 }
 function soilApply(clear) {
@@ -1352,6 +1353,10 @@ $('geoBtn').onclick = () => {
 };
 document.body.dataset.lang = LANG;
 setLang(LANG); initMap(); fieldUI(); soilUI();
+{ const folds = () => document.querySelectorAll('details.fold'); const big = () => [...folds()].filter(d => !d.closest('aside,.side,#prioBox') && d.closest('section'));
+  $('foldOpen').onclick = () => big().forEach(d => d.open = true); $('foldClose').onclick = () => big().forEach(d => d.open = false);
+  /* a chart drawn while its section was closed has no size: redraw it when the section opens */
+  folds().forEach(d => d.addEventListener('toggle', () => { if (d.open && S && d.querySelector('canvas')) drawCharts(); })); }
 $('uApply').onclick = () => soilApply(false); $('uClear').onclick = () => soilApply(true);
 $('liveList').innerHTML = liveStatusHTML();
 { const mq = matchMedia('(prefers-color-scheme: dark)'), root = document.documentElement, btn = $('themeBtn');

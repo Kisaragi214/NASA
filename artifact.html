@@ -748,6 +748,14 @@ select{padding:6px;border-radius:6px;border:1px solid var(--line);background:var
 .kv{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:.82rem;margin:0}
 .kv dd{margin:0;font-family:var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
 .kv dt{color:var(--muted)}
+details.fold>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;color:inherit;font-weight:inherit;font-size:1rem}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary h2{margin:0}
+details.fold>summary::after{content:"";flex:none;width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin-right:6px;transition:transform .15s}
+details.fold[open]>summary::after{transform:rotate(-135deg)}
+details.fold[open]>summary{margin-bottom:12px}
+details.fold{font-size:inherit}
+.foldbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:22px 0 10px;color:var(--muted);font-size:.86rem}
 details{font-size:.84rem}
 details summary{cursor:pointer;color:var(--water);font-weight:500}
 details dl{margin:8px 0 0;display:grid;gap:6px}
@@ -915,7 +923,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
     <p class="note"><span class="th">ไม่มีชลประทาน: คะแนนน้ำใช้ "ปีแล้ง 1 ใน 5 ปี" แทนค่าเฉลี่ย</span><span class="en">Without irrigation, the water score uses the 1-in-5 dry year instead of the average</span></p>
   </div>
   <div>
-    <h2><span class="th">ผลตรวจดินของแปลง (ถ้ามี)</span><span class="en">Your soil test (if you have one)</span></h2>
+    <details class="fold" data-fold="f-0"><summary><h2><span class="th">ผลตรวจดินของแปลง (ถ้ามี)</span><span class="en">Your soil test (if you have one)</span></h2></summary>
     <div class="row" style="align-items:flex-end">
       <div class="ctl" style="flex:1;min-width:80px"><label for="uPh">pH</label><input id="uPh" type="number" min="3" max="10" step="0.1" inputmode="decimal" placeholder="—"></div>
       <div class="ctl" style="flex:1;min-width:80px"><label for="uOm"><span><span class="th">อินทรียวัตถุ %</span><span class="en">Organic matter %</span></span></label><input id="uOm" type="number" min="0" max="15" step="0.1" inputmode="decimal" placeholder="—"></div>
@@ -923,6 +931,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
     <div class="ctl" style="margin-top:8px"><label for="uTex"><span><span class="th">เนื้อดิน</span><span class="en">Soil texture</span></span></label><select id="uTex"></select></div>
     <div class="row" style="margin-top:8px"><button type="button" class="btn" id="uApply"><span class="th">ใช้ค่าดินนี้</span><span class="en">Use these values</span></button><button type="button" class="btn" id="uClear"><span class="th">กลับไปใช้ SoilGrids</span><span class="en">Back to SoilGrids</span></button></div>
     <p class="note" id="uNote"></p>
+    </details>
   </div>
   <div>
     <h2><span class="th">Scenario อากาศ</span><span class="en">Climate scenario</span></h2>
@@ -942,8 +951,9 @@ table.cmp th{vertical-align:bottom;min-width:92px}
   <section class="block summary" id="summary" aria-live="polite"></section>
 
   <section class="block" id="recentBlock">
-    <h2><span class="th">สภาพอากาศ 90 วันล่าสุด เทียบกับปกติ</span><span class="en">Last 90 days vs normal</span></h2>
+    <details class="fold" data-fold="f-1" open><summary><h2><span class="th">สภาพอากาศ 90 วันล่าสุด เทียบกับปกติ</span><span class="en">Last 90 days vs normal</span></h2></summary>
     <div id="recentBody"></div>
+    </details>
   </section>
 
   <section class="block">
@@ -952,47 +962,54 @@ table.cmp th{vertical-align:bottom;min-width:92px}
   </section>
 
   <section class="block">
-    <h2><span class="th">ตารางเทียบแผน และสร้างแผนของคุณเอง</span><span class="en">Comparison table, and build your own rotation</span></h2>
+    <details class="fold" data-fold="f-2" open><summary><h2><span class="th">ตารางเทียบแผน และสร้างแผนของคุณเอง</span><span class="en">Comparison table, and build your own rotation</span></h2></summary>
     <div id="customBox"></div>
     <div id="cmpBody" style="margin-top:12px"></div>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">พืชที่ปลูกได้ที่จุดนี้ (คัดจากภูมิอากาศจริง)</span><span class="en">Crops that fit this point (screened on real climate)</span></h2>
+    <details class="fold" data-fold="f-3" open><summary><h2><span class="th">พืชที่ปลูกได้ที่จุดนี้ (คัดจากภูมิอากาศจริง)</span><span class="en">Crops that fit this point (screened on real climate)</span></h2></summary>
     <div id="screenBody"></div>
+    </details>
   </section>
 
+  <div class="foldbar"><span class="th">ข้อมูลเชิงลึก</span><span class="en">Details</span> · <button type="button" class="btn" id="foldOpen"><span class="th">ขยายทั้งหมด</span><span class="en">Expand all</span></button><button type="button" class="btn" id="foldClose"><span class="th">ย่อทั้งหมด</span><span class="en">Collapse all</span></button></div>
   <section class="block">
-    <h2><span class="th">อากาศและพืชพรรณของจุดนี้</span><span class="en">Climate and vegetation at this point</span></h2>
+    <details class="fold" data-fold="f-4"><summary><h2><span class="th">อากาศและพืชพรรณของจุดนี้</span><span class="en">Climate and vegetation at this point</span></h2></summary>
     <div class="charts">
       <div><div class="chartbox"><canvas id="cClim"></canvas></div><p class="src">NASA POWER 2001–2025 · ET₀: Hargreaves</p></div>
       <div><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src" id="ndviNote"></p></div>
     </div>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">SI: จำแนกรูปแบบพืชพรรณรอบจุดนี้ด้วย 2 วิธี</span><span class="en">SI: two ways to classify vegetation patterns around this point</span></h2>
+    <details class="fold" data-fold="f-5"><summary><h2><span class="th">SI: จำแนกรูปแบบพืชพรรณรอบจุดนี้ด้วย 2 วิธี</span><span class="en">SI: two ways to classify vegetation patterns around this point</span></h2></summary>
     <div class="charts">
       <div><div class="chartbox"><canvas id="cProf"></canvas></div></div>
       <div id="siBody" style="min-width:0"></div>
     </div>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">แนวโน้ม 25 ปี</span><span class="en">25-year trends</span> (Mann-Kendall + Sen's slope)</h2>
+    <details class="fold" data-fold="f-6"><summary><h2><span class="th">แนวโน้ม 25 ปี</span><span class="en">25-year trends</span> (Mann-Kendall + Sen's slope)</h2></summary>
     <div class="chartbox"><canvas id="cTrend"></canvas></div>
     <div class="tiles" id="trend" style="margin-top:12px"></div>
     <p class="src">NASA POWER daily 2001–2025 · p &lt; 0.05 = significant</p>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">ดินและภูมิประเทศของพื้นที่</span><span class="en">Soil and terrain</span></h2>
+    <details class="fold" data-fold="f-7"><summary><h2><span class="th">ดินและภูมิประเทศของพื้นที่</span><span class="en">Soil and terrain</span></h2></summary>
     <div class="tiles" id="soilTiles"></div>
     <p class="src">SoilGrids 2.0 (ISRIC) 250 m · PAW: Saxton &amp; Rawls (2006) · Slope: SRTM-derived terrain tiles, 60 m cells</p>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">วิธีคำนวณและข้อมูล</span><span class="en">Methods and data</span></h2>
+    <details class="fold" data-fold="f-8"><summary><h2><span class="th">วิธีคำนวณและข้อมูล</span><span class="en">Methods and data</span></h2></summary>
     <div class="tbl"><table>
       <thead><tr><th><span class="th">เกณฑ์</span><span class="en">Criterion</span></th><th><span class="th">คำนวณจาก</span><span class="en">Computed from</span></th><th><span class="th">ข้อมูล</span><span class="en">Data</span></th></tr></thead>
       <tbody>
@@ -1007,25 +1024,29 @@ table.cmp th{vertical-align:bottom;min-width:92px}
         <tr><td><span class="th">แผนแนะนำรายช่อง</span><span class="en">Per-cell recommendation</span></td><td><span class="th">MCDA ทั้งหมดข้างบน + น้ำหนักดินเพิ่มตาม slope ของช่อง</span><span class="en">All criteria above + soil weight raised by the cell's slope</span></td><td><span class="th">ทุกชุดข้างบน</span><span class="en">All of the above</span></td></tr>
         <tr><td><span class="th">คัดพืชที่ปลูกได้</span><span class="en">Crop screening</span></td><td><span class="th">ค่าต่ำสุดของความเหมาะสม 3 ด้าน (อุณหภูมิรายเดือน, ฝนรวมช่วงปลูก, pH) แบบสี่เหลี่ยมคางหมูของ ECOCROP ลองทุกเดือนเริ่มปลูก · ช่วงฝนปรับตามสัดส่วนอายุพืช (สมมติฐาน)</span><span class="en">Minimum of three ECOCROP trapezoid fits (monthly temperature, rain over the cycle, pH), tried for every start month · rain limits scaled by cycle length (assumption)</span></td><td>NASA POWER, SoilGrids, FAO ECOCROP</td></tr>
         <tr><td><span class="th">k-means เทียบกับกฎ</span><span class="en">k-means vs rules</span></td><td><span class="th">NDVI 1 ปี (Terra + Aqua ทุก 8 วัน ราว 46 ค่า) ของ pixel ราว 15×15 รอบจุด (±2 km) · k-means ลอง k = 2–8 แล้วหยุดเมื่อเพิ่มกลุ่มแล้วความกระจายในกลุ่มลดไม่ถึง 8% (เริ่มแบบ k-means++ ค่าสุ่มคงที่) · กฎ phenology 8 คลาส เทียบกับกฎ phenology แล้วรายงาน % ที่ตรงกัน</span><span class="en">One year of NDVI (Terra + Aqua, every 8 days, about 46 values) for about 15×15 pixels around the point (±2 km) · k-means tries k = 2–8 and stops when one more group cuts the within-group spread by less than 8 % (seeded k-means++) · 8 phenology rule classes against phenology rules, with % agreement</span></td><td>MODIS MOD13Q1</td></tr>
-        <tr><td><span class="th">รวมข้อมูลต่างความละเอียด</span><span class="en">Harmonising resolutions</span></td><td><span class="th">กริดกลาง 60 m: ความลาดชันเฉลี่ยจาก DEM ~30 m ขึ้นมา, พืชคลุมดินจาก pixel MODIS 250 m ที่ช่องนั้นตกอยู่, ดิน 250 m และภูมิอากาศ ~50 km เป็นค่าเดียวทั้งกริด</span><span class="en">Common 60 m grid: slope averaged up from the ~30 m DEM, ground cover taken from the 250 m MODIS pixel each cell falls in, soil (250 m) and climate (~50 km) uniform across the grid</span></td><td>SRTM, MODIS, SoilGrids, POWER</td></tr>
+        <tr><td><span class="th">รวมข้อมูลต่างความละเอียด</span><span class="en">Harmonising resolutions</span></td><td><span class="th">กริดกลาง 30 m กว้างราว 4 km (เมื่อวาดแปลง กริดหดเท่าแปลงและซอยถึง 5 m เพื่อแสดงผล): ความลาดชันจาก DEM ~30 m ที่เฉลี่ย 5×5 pixel, พืชพรรณ MODIS 250 m ไล่ค่าแบบ bilinear, ดิน 250 m และภูมิอากาศ ~50 km เป็นค่าเดียวทั้งกริด</span><span class="en">Common 30 m grid about 4 km wide (with a drawn field the grid shrinks to the field and is subdivided down to 5 m for display): slope from the ~30 m DEM averaged over 5×5 pixels, 250 m MODIS vegetation interpolated bilinearly, soil (250 m) and climate (~50 km) uniform across the grid</span></td><td>SRTM, MODIS, SoilGrids, POWER</td></tr>
+        <tr><td><span class="th">อากาศสุดขั้ว</span><span class="en">Extreme weather</span></td><td><span class="th">วันฝน ≥ 50 mm ต่อปี, ช่วงฝนทิ้งยาวสุดใน 6 เดือนที่ฝนมากสุด, แนวโน้มด้วย Mann-Kendall + Sen's slope · วันฝนหนักตอนดินโล่ง = ค่าเฉลี่ยรายเดือนของวันฝนหนัก × ส่วนที่ไม่มีพืชคลุม</span><span class="en">Days with ≥ 50 mm rain per year, longest dry spell in the six wettest months, trends by Mann-Kendall + Sen's slope · heavy-rain days on bare soil = monthly mean of heavy-rain days × uncovered share</span></td><td>NASA POWER</td></tr>
+        <tr><td><span class="th">ผลตรวจดินของผู้ใช้</span><span class="en">Your soil test</span></td><td><span class="th">ค่าที่กรอกแทนค่า SoilGrids · เนื้อดินแปลงเป็นสัดส่วนดินเหนียว/ทราย แล้วคิดน้ำที่พืชใช้ได้ใหม่ด้วย Saxton & Rawls</span><span class="en">Entered values replace SoilGrids · texture is turned into clay/sand shares and plant-available water is recalculated with Saxton & Rawls</span></td><td><span class="th">ผู้ใช้กรอก</span><span class="en">User input</span></td></tr>
         <tr><td><span class="th">รายได้</span><span class="en">Income</span></td><td><span class="th">ผู้ใช้ตั้งเอง</span><span class="en">User-set</span></td><td><span class="th">ไม่มีใน NASA</span><span class="en">Not in NASA data</span></td></tr>
       </tbody>
     </table></div>
     <p class="note" style="margin-top:8px"><span class="th">Scenario: ET₀ +2.2% ต่อ +1 °C (ความไวของ Hargreaves), วันร้อน +30% ต่อ +1 °C (ประมาณ), ฝนปรับตามสัดส่วนทุกเดือน · ข้อจำกัด: ภูมิอากาศ ~50 km และดิน 250 m เป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจาก slope เท่านั้น · แผนหมุนเวียน 5 แบบเป็นชุดตั้งต้นสำหรับพืชไร่เขตร้อน ยังไม่ได้คัดพืชตามจุด</span><span class="en">Scenario: ET₀ +2.2% per +1 °C (Hargreaves sensitivity), hot days +30% per +1 °C (approximate), rainfall scaled monthly · Limits: climate (~50 km) and soil (250 m) are single values for the grid, so cells differ only by slope · the 5 rotations are a starter set for tropical field crops, not yet screened per point</span></p>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">บทบาทของพืชในรอบหมุนเวียน</span><span class="en">What each crop role does</span></h2>
+    <details class="fold" data-fold="f-9"><summary><h2><span class="th">บทบาทของพืชในรอบหมุนเวียน</span><span class="en">What each crop role does</span></h2></summary>
     <div class="tiles">
       <div><b class="d"><span class="th">ตรึงไนโตรเจน</span><span class="en">Nitrogen fixing</span></b><span class="th">ถั่วดึง N จากอากาศผ่านปมราก พืชรอบถัดไปใช้ปุ๋ยน้อยลง</span><span class="en">Legumes fix N through root nodules, so the next crop needs less fertiliser</span></div>
       <div><b class="d"><span class="th">พืชคลุมดิน / ปุ๋ยพืชสด</span><span class="en">Cover / green manure</span></b><span class="th">คลุมดินตอนฝนตกหนัก ไถกลบแล้วเพิ่มอินทรียวัตถุ</span><span class="en">Protects soil in heavy rain; adds organic matter when incorporated</span></div>
       <div><b class="d"><span class="th">รากลึก</span><span class="en">Deep rooting</span></b><span class="th">ใช้น้ำชั้นล่างหน้าแล้ง เปิดช่องให้น้ำซึม</span><span class="en">Uses deep stored water in the dry season and opens channels for infiltration</span></div>
       <div><b class="d"><span class="th">ทนแล้ง</span><span class="en">Drought tolerant</span></b><span class="th">อยู่รอดเมื่อฝนทิ้งช่วง</span><span class="en">Survives dry spells</span></div>
     </div>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">ดาวเทียมต่างจากการวัดภาคพื้นอย่างไร</span><span class="en">Satellite vs ground measurements</span></h2>
+    <details class="fold" data-fold="f-10"><summary><h2><span class="th">ดาวเทียมต่างจากการวัดภาคพื้นอย่างไร</span><span class="en">Satellite vs ground measurements</span></h2></summary>
     <div class="tbl"><table>
       <thead><tr><th></th><th><span class="th">ดาวเทียม (NASA)</span><span class="en">Satellite (NASA)</span></th><th><span class="th">วัดภาคพื้น</span><span class="en">Ground</span></th></tr></thead>
       <tbody>
@@ -1036,10 +1057,11 @@ table.cmp th{vertical-align:bottom;min-width:92px}
       </tbody>
     </table></div>
     <p class="note" style="margin-top:8px"><span class="th">ใช้ร่วมกัน: ดาวเทียมบอกภาพรวมและแนวโน้ม ส่วนสถานีอุตุฯ และการตรวจดินในแปลงใช้ยืนยันก่อนตัดสินใจ</span><span class="en">Use both: satellites give the picture and the trend; weather stations and field soil tests confirm before acting</span></p>
+    </details>
   </section>
 
   <section class="block">
-    <h2><span class="th">อภิธานศัพท์</span><span class="en">Glossary</span></h2>
+    <details class="fold" data-fold="f-11"><summary><h2><span class="th">อภิธานศัพท์</span><span class="en">Glossary</span></h2></summary>
     <dl class="gl">
       <dt>ET₀</dt><dd><span class="th">น้ำที่ระเหยและคายจากพืชอ้างอิงต่อวัน บอกว่าอากาศดึงน้ำแรงแค่ไหน</span><span class="en">Reference evapotranspiration: how strongly the air pulls water from a reference crop each day</span></dd>
       <dt>Kc</dt><dd><span class="th">ตัวคูณของพืชแต่ละช่วงอายุ น้ำที่พืชใช้ = ET₀ × Kc</span><span class="en">Crop coefficient by growth stage; crop water use = ET₀ × Kc</span></dd>
@@ -1049,6 +1071,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
       <dt>RUSLE / C, S factor</dt><dd><span class="th">สมการประเมินดินพังทลาย C = ผลของสิ่งคลุมดิน S = ผลของความลาดชัน</span><span class="en">Soil-loss equation; C = effect of cover, S = effect of slope</span></dd>
       <dt>Mann-Kendall / Sen's slope</dt><dd><span class="th">ทดสอบว่ามีแนวโน้มจริงไหม และเปลี่ยนเร็วแค่ไหน</span><span class="en">Tests whether a trend is real and how fast it changes</span></dd>
     </dl>
+    </details>
   </section>
   <p class="src" style="text-align:center">Field Shift Map · NASA Space Apps Challenge 2026 · <span class="th">พัฒนาโดยใช้ AI ช่วย ดูรายละเอียดในหน้าโปรเจกต์</span><span class="en">Built with AI assistance; see the project page for disclosure</span></p>
 </div>
@@ -1058,4 +1081,4 @@ table.cmp th{vertical-align:bottom;min-width:92px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <button type="button" id="mobToggle"></button>
-<script src="app.js?v=6e9de499"></script>
+<script src="app.js?v=10dbe4c5"></script>

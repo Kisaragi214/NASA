@@ -260,7 +260,7 @@ function setLang(l) {
   LANG = l; document.body.dataset.lang = l; document.documentElement.lang = l;
   try { localStorage.setItem('fs-lang', l); } catch (e) {}
   $('lTH').setAttribute('aria-pressed', l === 'th'); $('lEN').setAttribute('aria-pressed', l === 'en');
-  buildControls(); satLegend();
+  buildControls(); satLegend(); customUI(); fieldUI(); window.dispatchEvent(new Event('scroll'));
   if (!S) { if (!$('summary').dataset.err) $('summary').textContent = t('กำลังดึงข้อมูล NASA ของจุดเริ่มต้น…', 'Fetching NASA data for the starting point…'); return; }
   renderAll();
   if (S.recentJSON) loadRecent(S);
@@ -388,14 +388,16 @@ function drawSat() {
   if (!o || o.id === 'none') return;
   const layer = satLayer = makeSat(o).addTo(map);
   let ok = 0;
-  layer.on('tileload', () => { ok++; if (layer === satLayer) $('satMsg').textContent = ''; });
+  /* a stacked layer is a group: listen on each member, groups do not pass tile events on */
+  const subs = layer.getLayers ? layer.getLayers() : [layer];
+  subs.forEach(l => l.on('tileload', () => { ok++; if (layer === satLayer) $('satMsg').textContent = ''; }));
   setTimeout(() => { if (layer === satLayer && !ok) $('satMsg').textContent = o.wms ? t('เซิร์ฟเวอร์ SoilGrids ตอบช้า รอสักครู่ หรือกดเลือกชั้นนี้อีกครั้ง', 'The SoilGrids server is slow; wait a moment or select this layer again') : t('กำลังโหลดภาพจาก NASA GIBS…', 'Loading NASA GIBS imagery…'); }, 8000);
-  layer.on('tileerror', () => {
+  subs.forEach(l => l.on('tileerror', () => {
     if (layer !== satLayer) return;
     satErr++;
     if (satErr >= 3 && !ok && o.gibs && !o.days && satBack < 6) { satBack++; satErr = 0; drawSat(); }
     else if (satErr >= 3 && !ok) $('satMsg').textContent = o.wms ? t('โหลดชั้นข้อมูลนี้ไม่ได้ในตอนนี้', 'This layer cannot be loaded right now') : t('ไม่มีภาพช่วงวันที่นี้ ลองเลือกวันอื่น', 'No image around this date; try another day');
-  });
+  }));
 }
 function satLegend() {
   const o = SAT.find(x => x.id === curSat); let h = '';

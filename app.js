@@ -58,8 +58,8 @@ const charts = {};
 
 /* ---------- model ---------- */
 const pct = (arr, q) => { const a = [...arr].sort((x, y) => x - y); const i = (a.length - 1) * q; const lo = Math.floor(i), hi = Math.ceil(i); return a[lo] + (a[hi] - a[lo]) * (i - lo); };
-function evalMonths(r, P, ET, HOT, HV = new Array(12).fill(0)) {
-  let heavyBare = 0, deficit = 0, use = 0, heat = 0, eroNum = 0, eroDen = 0, bare = 0, store = S.soil.deepStore, phPen = 0, months = 0;
+function evalMonths(r, P, ET, HOT, HV = new Array(12).fill(0), FR = new Array(12).fill(0)) {
+  let frost = 0, heavyBare = 0, deficit = 0, use = 0, heat = 0, eroNum = 0, eroDen = 0, bare = 0, store = S.soil.deepStore, phPen = 0, months = 0;
   const fams = new Set();
   for (let i = 0; i < 12; i++) {
     const c = r.m[i]; const kc = c ? c[1] : 0; const cover = c ? Math.min(1, 0.25 + 0.7 * kc) : 0;
@@ -67,17 +67,17 @@ function evalMonths(r, P, ET, HOT, HV = new Array(12).fill(0)) {
       const cr = CROPS[c[0]]; fams.add(cr.fam); months++;
       let d = Math.max(0, ET[i] * kc - 0.8 * P[i]);
       if (cr.deep) { const u = Math.min(d, store); store -= u; d -= u; }
-      use += ET[i] * kc; deficit += d; heat += HOT[i] * cr.sens;
+      use += ET[i] * kc; deficit += d; frost += FR[i]; heat += HOT[i] * cr.sens;
       const ph = S.soil.ph; phPen += ph < cr.ph[0] ? cr.ph[0] - ph : ph > cr.ph[1] ? ph - cr.ph[1] : 0;
     } else bare++;
     eroNum += P[i] * (1 - cover); eroDen += P[i]; heavyBare += HV[i] * (1 - cover);
   }
-  return { deficit, use, heat, heavyBare, erosion: eroNum / eroDen, bare, fams: [...fams], phPen: months ? Math.min(.2, phPen / months) : 0 };
+  return { deficit, use, heat, heavyBare, frost, erosion: eroNum / eroDen, bare, fams: [...fams], phPen: months ? Math.min(.2, phPen / months) : 0 };
 }
 function evalRot(r, rf, dT) {
   const adj = rows => ({ P: rows.map(x => x[0] * (1 + rf)), ET: rows.map(x => x[1] * (1 + 0.022 * dT)), H: rows.map(x => Math.min(30, x[2] * (1 + 0.3 * dT))) });
   const c = adj(S.clim.map(x => [x[0], x[1], x[3]]));
-  const base = evalMonths(r, c.P, c.ET, c.H, extremes().heavyM.map(v => v * (1 + rf)));
+  const base = evalMonths(r, c.P, c.ET, c.H, extremes().heavyM.map(v => v * (1 + rf)), extremes().frostM);
   const yrs = Object.values(S.yearly).map(rows => { const a = adj(rows); return evalMonths(r, a.P, a.ET, a.H); });
   const defs = yrs.map(y => y.deficit);
   base.defMean = defs.reduce((a, b) => a + b, 0) / defs.length;
@@ -537,18 +537,21 @@ function mk(ys) { const n = ys.length; let s = 0; for (let i = 0; i < n; i++) fo
 function extremes() {
   if (S.ext) return S.ext;
   const wet = S.clim.map((c, m) => [c[0], m]).sort((a, b) => b[0] - a[0]).slice(0, 6).map(x => x[1]), isWet = new Set(wet);
-  const yrs = {}, heavyM = new Array(12).fill(0);
-  for (const d of S.days) { const y = yrs[d.y] || (yrs[d.y] = { heavy: 0, run: 0, dry: 0 }); if (d.p >= 50) { y.heavy++; heavyM[d.m]++; }
+  const yrs = {}, heavyM = new Array(12).fill(0), frostM = new Array(12).fill(0), ymMin = {};
+  for (const d of S.days) { const y = yrs[d.y] || (yrs[d.y] = { heavy: 0, run: 0, dry: 0, frost: 0 }); if (d.p >= 50) { y.heavy++; heavyM[d.m]++; }
+    if (d.tn <= 0) { y.frost++; frostM[d.m]++; } const k = d.y * 12 + d.m; if (!(k in ymMin) || d.tn < ymMin[k]) ymMin[k] = d.tn;
     if (isWet.has(d.m)) { if (d.p < 1) { y.run++; if (y.run > y.dry) y.dry = y.run; } else y.run = 0; } }
   const ys = Object.keys(yrs).map(Number).sort((a, b) => a - b);
-  return S.ext = { years: ys, heavy: ys.map(y => yrs[y].heavy), dry: ys.map(y => yrs[y].dry), heavyM: heavyM.map(v => v / ys.length) };
+  /* coldest night of each calendar month, averaged over the years */
+  const coldM = Array.from({ length: 12 }, (_, m) => { const v = ys.map(y => ymMin[y * 12 + m]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 99; });
+  return S.ext = { years: ys, heavy: ys.map(y => yrs[y].heavy), dry: ys.map(y => yrs[y].dry), frost: ys.map(y => yrs[y].frost), heavyM: heavyM.map(v => v / ys.length), frostM: frostM.map(v => v / ys.length), coldM };
 }
 function trends() {
   const xs = S.annual.map(a => a[0]);
   const items = [[t('ฝนรายปี', 'Annual rain'), 1, t('mm/ทศวรรษ', 'mm/decade'), 0], [t('Tmax เฉลี่ย', 'Mean Tmax'), 2, t('°C/ทศวรรษ', '°C/decade'), 2], [t('วันร้อน ≥35 °C', 'Days ≥35 °C'), 3, t('วัน/ทศวรรษ', 'days/decade'), 0], [t('ฝน ม.ค.–เม.ย.', 'Jan–Apr rain'), 4, t('mm/ทศวรรษ', 'mm/decade'), 0]];
   $('trend').innerHTML = items.map(([n, i, u, dp]) => { const ys = S.annual.map(a => a[i]); const s = sen(xs, ys) * 10, p = mk(ys);
     return `<div>${n}<b>${s >= 0 ? '+' : ''}${s.toFixed(dp)} ${u}</b><span class="pill ${p < .05 ? 'sig' : 'ns'}">p=${p.toFixed(2)} ${p < .05 ? t('มีนัยสำคัญ', 'significant') : t('ไม่ชัด', 'not significant')}</span></div>`; }).join('')
-    + (() => { const E = extremes(), m = a => a.reduce((x, y) => x + y, 0) / a.length; return [[t('วันฝนหนัก ≥50 mm', 'Heavy-rain days ≥50 mm'), E.heavy, t('วัน/ปี', 'days/yr'), t('วัน/ทศวรรษ', 'days/decade')], [t('ช่วงฝนทิ้งยาวสุดในฤดูฝน', 'Longest dry spell in the wet season'), E.dry, t('วัน', 'days'), t('วัน/ทศวรรษ', 'days/decade')]].map(([n, ys, u0, u]) => { const s = sen(E.years, ys) * 10, p = mk(ys);
+    + (() => { const E = extremes(), m = a => a.reduce((x, y) => x + y, 0) / a.length; return [[t('วันฝนหนัก ≥50 mm', 'Heavy-rain days ≥50 mm'), E.heavy, t('วัน/ปี', 'days/yr'), t('วัน/ทศวรรษ', 'days/decade')], [t('ช่วงฝนทิ้งยาวสุดในฤดูฝน', 'Longest dry spell in the wet season'), E.dry, t('วัน', 'days'), t('วัน/ทศวรรษ', 'days/decade')], [t('คืนน้ำค้างแข็ง ≤0 °C', 'Frost nights ≤0 °C'), E.frost, t('คืน/ปี', 'nights/yr'), t('คืน/ทศวรรษ', 'nights/decade')]].map(([n, ys, u0, u]) => { const s = sen(E.years, ys) * 10, p = mk(ys);
       return `<div>${n}<b>${m(ys).toFixed(1)} ${u0}</b>${t('แนวโน้ม', 'trend')} ${s >= 0 ? '+' : ''}${s.toFixed(1)} ${u} <span class="pill ${p < .05 ? 'sig' : 'ns'}">p=${p.toFixed(2)}</span></div>`; }).join(''); })();
 }
 function soilTiles() {
@@ -917,7 +920,7 @@ const ROLE = { nfix: { th: 'ตรึง N', en: 'N-fixing' }, cover: { th: 'ค
 const trap = (v, a, b, c, d) => v <= a || v >= d ? 0 : v < b ? (v - a) / (b - a) : v <= c ? 1 : (d - v) / (d - c);
 function siteTP(st) {
   if (!S.tmean) { const sum = new Array(12).fill(0), n = new Array(12).fill(0); for (const d of S.days) { sum[d.m] += (d.tx + d.tn) / 2; n[d.m]++; } S.tmean = sum.map((v, m) => v / n[m]); }
-  return { T: S.tmean.map(v => v + st.dT), P: S.clim.map(c => c[0] * (1 + st.rf)), ph: S.soil.ph, irr: st.irr };
+  return { T: S.tmean.map(v => v + st.dT), P: S.clim.map(c => c[0] * (1 + st.rf)), ph: S.soil.ph, irr: st.irr, cold: extremes().coldM.map(v => v + st.dT) };
 }
 const cycleMonths = c => Math.max(1, Math.min(12, Math.round(c.days / 30)));
 /* Fit of crop c sown in month s0: min of three ECOCROP trapezoids (monthly temperature, rain over the cycle, soil pH).
@@ -928,9 +931,11 @@ function fitAt(c, s0, E) {
   let ts = 1, tm = ms[0]; for (const m of ms) { const v = trap(E.T[m], c.tmin, c.topmn, c.topmx, c.tmax); if (v < ts) { ts = v; tm = m; } }
   const rain = ms.reduce((a, m) => a + E.P[m], 0);
   let rs = trap(rain, c.rmin * f, c.ropmn * f, c.ropmx * f, c.rmax * f); if (E.irr && rain < c.ropmn * f) rs = 1;
-  const ps = trap(E.ph, c.phmin, c.phopmn, c.phopmx, c.phmax), suit = Math.min(ts, rs, ps);
+  let ks = 1, km = ms[0]; if (E.cold && c.ktmp != null) for (const m of ms) { const v = E.cold[m], k = v <= c.ktmp ? 0.3 : v <= c.ktmp + 2 ? 0.7 : 1; if (k < ks) { ks = k; km = m; } }
+  const ps = trap(E.ph, c.phmin, c.phopmn, c.phopmx, c.phmax), suit = Math.min(ts, rs, ps, ks);
   let why = null;
-  if (suit < 1) {
+  if (ks < 1 && ks <= Math.min(ts, rs, ps)) why = { th: `${MTH.th[km]} เสี่ยงน้ำค้างแข็ง (คืนที่หนาวสุดราว ${E.cold[km].toFixed(0)} °C, พืชตายที่ ${c.ktmp} °C)`, en: `${MTH.en[km]} frost risk (coldest night about ${E.cold[km].toFixed(0)} °C, crop killed at ${c.ktmp} °C)` };
+  else if (suit < 1) {
     if (ts <= rs && ts <= ps) { const v = E.T[tm]; why = v > c.topmx ? { th: `${MTH.th[tm]} ร้อนเกิน (${v.toFixed(0)} °C, เหมาะสุดไม่เกิน ${c.topmx})`, en: `${MTH.en[tm]} too hot (${v.toFixed(0)} °C, optimum ≤ ${c.topmx})` } : { th: `${MTH.th[tm]} เย็นเกิน (${v.toFixed(0)} °C, เหมาะสุดตั้งแต่ ${c.topmn})`, en: `${MTH.en[tm]} too cool (${v.toFixed(0)} °C, optimum ≥ ${c.topmn})` }; }
     else if (rs <= ps) why = rain < c.ropmn * f ? { th: `ฝนช่วงปลูกน้อยเกิน (${Math.round(rain)} mm, ต้องการ ≥ ${Math.round(c.ropmn * f)})`, en: `too little rain in the cycle (${Math.round(rain)} mm, needs ≥ ${Math.round(c.ropmn * f)})` } : { th: `ฝนช่วงปลูกมากเกิน (${Math.round(rain)} mm, เหมาะสุด ≤ ${Math.round(c.ropmx * f)})`, en: `too much rain in the cycle (${Math.round(rain)} mm, optimum ≤ ${Math.round(c.ropmx * f)})` };
     else why = { th: `pH ดิน ${E.ph} อยู่นอกช่วงเหมาะสุด ${c.phopmn}–${c.phopmx}`, en: `soil pH ${E.ph} outside the optimum ${c.phopmn}–${c.phopmx}` };
@@ -1082,6 +1087,7 @@ function compareTable(st, ev, soil, scores, scrBy) {
     [t('ปีที่ขาดน้ำเกิน 150 mm', 'Years short > 150 mm'), i => ev[i].dryYears, v => v, false],
     [t('วันร้อน ≥35 °C ตอนมีพืช', 'Days ≥35 °C with crop'), i => ev[i].heat, v => (+v).toFixed(1), false],
     [t('ฝนที่ตกตอนดินโล่ง', 'Rain falling on bare soil'), i => ev[i].erosion * 100, v => Math.round(v) + '%', false],
+    [t('คืนน้ำค้างแข็ง (≤0 °C) ตอนมีพืช (วัน/ปี)', 'Frost nights (≤0 °C) with crop (per yr)'), i => ev[i].frost, v => (+v).toFixed(1), false],
     [t('วันฝนหนัก ≥50 mm ตอนดินโล่ง (วัน/ปี)', 'Heavy-rain days ≥50 mm on bare soil (per yr)'), i => ev[i].heavyBare, v => (+v).toFixed(1), false],
     [t('เดือนที่แปลงว่าง', 'Idle months'), i => ev[i].bare, v => v, false],
     [t('สุขภาพดิน (0–100)', 'Soil health (0–100)'), i => soil[i] * 100, v => Math.round(v), true],

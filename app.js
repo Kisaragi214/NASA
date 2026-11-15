@@ -314,7 +314,7 @@ function update() {
         <dt>${t('ข้อมูลที่ยังขาด', 'Information gaps')}</dt><dd>${L2(r.gap)}</dd>
         <dt>${t('ความเสี่ยงที่ต้องตรวจในพื้นที่', 'Risks to check locally')}</dt><dd>${L2(r.risk)}</dd>
       </dl></details>
-      <span class="conf">${t('ความมั่นใจ', 'Confidence')}: ${i === b0 ? t('กลาง', 'medium') : t('กลาง–ต่ำ', 'medium–low')} · ${t('ภูมิอากาศ ~50 km · ดิน 250 m (ไม่ใช่ผลตรวจดินในแปลง) · รายได้ตั้งเอง', 'climate ~50 km · soil 250 m (not a field test) · income user-set')}${t(' · แผน 5 แบบเป็นชุดตั้งต้นสำหรับพืชไร่เขตร้อน ยังไม่ได้คัดพืชตามจุดนี้', ' · the 5 rotations are a starter set for tropical field crops, not yet screened for this point')}</span>
+      <span class="conf">${t('ความมั่นใจ', 'Confidence')}: ${i === b0 ? t('กลาง', 'medium') : t('กลาง–ต่ำ', 'medium–low')} · ${t('ภูมิอากาศ ~50 km · ดิน 250 m (ไม่ใช่ผลตรวจดินในแปลง) · รายได้ตั้งเอง', 'climate ~50 km · soil 250 m (not a field test) · income user-set')}${t(' · ช่วงที่พืชทนได้มาจาก ECOCROP (ระดับโลก ไม่แยกพันธุ์)', ' · crop ranges from ECOCROP (global, not variety-specific)')}${S.soilUser ? '' : t(' · ควรตรวจดินจริง', ' · test the soil')}</span>
     </article>`;
   }).join('');
   const bb = R[best], eb = ev[best];
@@ -434,7 +434,7 @@ function recFor(st) {
   if (recCache.key === key) return recCache.best;
   const memo = {}; const sMed = sFactor(3);
   const best = GRID.info.map((_, p) => {
-    const ci = cellInfo(p); if (!ci.farm) return -1;
+    const ci = cellInfo(p); if (!ci.farm) return -1; if (ci.fr === 1) return -2; /* MODIS sees it as built-up, water or bare all year: no crop advice */
     const boost = Math.max(-0.3, Math.min(1.5, (sFactor(ci.slope) / sMed - 1) * 0.5));
     const kb = boost.toFixed(2);
     if (!(kb in memo)) { const sc = scoreAll(st, +kb).scores; memo[kb] = sc.indexOf(Math.max(...sc)); }
@@ -455,7 +455,7 @@ function paintCells() {
     let col = null;
     if (mapMode === 'erosion') col = ci.farm ? RISK_COL[riskBreaks.filter(b => ci.risk > b).length] : null;
     else if (mapMode === 'slope') col = isNaN(ci.slope) ? null : SLOPE_COL[SLOPE_BRK.filter(b => ci.slope > b).length];
-    else if (mapMode === 'rec') col = rec && rec[p] >= 0 ? PLAN_COL[rec[p]] : null;
+    else if (mapMode === 'rec') col = rec && rec[p] >= 0 ? PLAN_COL[rec[p]] : rec && rec[p] === -2 ? '#8a8f8b' : null;
     else if (mapMode === 'km') col = A && ci.fk != null ? KM_COL[ci.fk] : null;
     else if (mapMode === 'rules') col = A && ci.fr >= 0 ? RCOL[ci.fr] : null;
     if (!col) return;
@@ -486,7 +486,7 @@ function legend(rec) {
   if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${(GRID.hasCover ? t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM 30 m) × พืชคลุมดินช่วงต่ำสุด (MODIS 250 m ปรับลงกริดเดียวกัน) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM, 30 m) × low-season ground cover (MODIS 250 m resampled to the same grid), quintiles within the grid') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด · จะคูณด้วยพืชคลุมดินเมื่อ NDVI โหลดเสร็จ', 'RUSLE slope factor S (SRTM), quintiles within the grid · ground cover is applied once NDVI has loaded'))}</p>`;
   else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
   else if (mapMode === 'rec' && !rec) h = `<p class="note">${t('กำลังสร้างแผน…', 'Building rotations…')}</p>`;
-  else if (mapMode === 'rec' && rec) h = R.map((r, i) => count(p => rec[p] === i) === '0%' ? '' : `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
+  else if (mapMode === 'rec' && rec) h = R.map((r, i) => count(p => rec[p] === i) === '0%' ? '' : `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v === -2) ? `<span><i style="background:#8a8f8b"></i>${t('ไม่ใช่พื้นที่เกษตร (ชุมชน / น้ำ / โล่งทั้งปี) ไม่แนะนำ', 'Not farmland (built-up / water / bare all year): no advice')}<b>${count(p => rec[p] === -2)}</b></span>` : '') + (rec.some(v => v === -1) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] === -1)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
   $('legend').innerHTML = h + `<p class="note">${gridNote}</p>`;
 }
 function cellHTML(p) {
@@ -938,32 +938,55 @@ const ROLE = { nfix: { th: 'ตรึง N', en: 'N-fixing' }, cover: { th: 'ค
 const trap = (v, a, b, c, d) => v <= a || v >= d ? 0 : v < b ? (v - a) / (b - a) : v <= c ? 1 : (d - v) / (d - c);
 function siteTP(st) {
   if (!S.tmean) { const sum = new Array(12).fill(0), n = new Array(12).fill(0); for (const d of S.days) { sum[d.m] += (d.tx + d.tn) / 2; n[d.m]++; } S.tmean = sum.map((v, m) => v / n[m]); }
-  return { T: S.tmean.map(v => v + st.dT), P: S.clim.map(c => c[0] * (1 + st.rf)), ph: S.soil.ph, irr: st.irr, cold: extremes().coldM.map(v => v + st.dT) };
+  return { T: S.tmean.map(v => v + st.dT), P: S.clim.map(c => c[0] * (1 + st.rf)), ET: S.clim.map(c => c[1] * (1 + 0.022 * st.dT)), paw: S.soil.paw, ph: S.soil.ph, irr: st.irr, cold: extremes().coldM.map(v => v + st.dT) };
 }
 const cycleMonths = c => Math.max(1, Math.min(12, Math.round(c.days / 30)));
 /* Fit of crop c sown in month s0: min of three ECOCROP trapezoids (monthly temperature, rain over the cycle, soil pH).
    ECOCROP rain limits describe a typical full cycle; they are scaled when our cycle is shorter (assumption, floor 0.3). */
-function fitAt(c, s0, E) {
-  const nm = cycleMonths(c), f = Math.min(1, Math.max(0.3, c.days / ((c.gmin + c.gmax) / 2)));
-  const ms = Array.from({ length: nm }, (_, i) => (s0 + i) % 12);
-  let ts = 1, tm = ms[0]; for (const m of ms) { const v = trap(E.T[m], c.tmin, c.topmn, c.topmx, c.tmax); if (v < ts) { ts = v; tm = m; } }
-  const rain = ms.reduce((a, m) => a + E.P[m], 0);
-  let rs = trap(rain, c.rmin * f, c.ropmn * f, c.ropmx * f, c.rmax * f); if (E.irr && rain < c.ropmn * f) rs = 1;
-  let ks = 1, km = ms[0]; if (E.cold && c.ktmp != null) for (const m of ms) { const v = E.cold[m], k = v <= c.ktmp ? 0.3 : v <= c.ktmp + 2 ? 0.7 : 1; if (k < ks) { ks = k; km = m; } }
-  const ps = trap(E.ph, c.phmin, c.phopmn, c.phopmx, c.phmax), suit = Math.min(ts, rs, ps, ks);
-  let why = null;
-  if (ks < 1 && ks <= Math.min(ts, rs, ps)) why = { th: `${MTH.th[km]} เสี่ยงน้ำค้างแข็ง (คืนที่หนาวสุดราว ${E.cold[km].toFixed(0)} °C, พืชตายที่ ${c.ktmp} °C)`, en: `${MTH.en[km]} frost risk (coldest night about ${E.cold[km].toFixed(0)} °C, crop killed at ${c.ktmp} °C)` };
-  else if (suit < 1) {
-    if (ts <= rs && ts <= ps) { const v = E.T[tm]; why = v > c.topmx ? { th: `${MTH.th[tm]} ร้อนเกิน (${v.toFixed(0)} °C, เหมาะสุดไม่เกิน ${c.topmx})`, en: `${MTH.en[tm]} too hot (${v.toFixed(0)} °C, optimum ≤ ${c.topmx})` } : { th: `${MTH.th[tm]} เย็นเกิน (${v.toFixed(0)} °C, เหมาะสุดตั้งแต่ ${c.topmn})`, en: `${MTH.en[tm]} too cool (${v.toFixed(0)} °C, optimum ≥ ${c.topmn})` }; }
-    else if (rs <= ps) why = rain < c.ropmn * f ? { th: `ฝนช่วงปลูกน้อยเกิน (${Math.round(rain)} mm, ต้องการ ≥ ${Math.round(c.ropmn * f)})`, en: `too little rain in the cycle (${Math.round(rain)} mm, needs ≥ ${Math.round(c.ropmn * f)})` } : { th: `ฝนช่วงปลูกมากเกิน (${Math.round(rain)} mm, เหมาะสุด ≤ ${Math.round(c.ropmx * f)})`, en: `too much rain in the cycle (${Math.round(rain)} mm, optimum ≤ ${Math.round(c.ropmx * f)})` };
-    else why = { th: `pH ดิน ${E.ph} อยู่นอกช่วงเหมาะสุด ${c.phopmn}–${c.phopmx}`, en: `soil pH ${E.ph} outside the optimum ${c.phopmn}–${c.phopmx}` };
+/* Winter-hardy crops: ECOCROP gives no usable killing temperature for them (0 °C = missing), so approximate
+   winter-hardiness limits from extension guides are used, and months colder than the crop's minimum are dormancy:
+   the crop stays in the field (it covers the soil) but those months are not judged on temperature. */
+const HARDY = { rye: -30, wheat: -20, barley: -12, vetch: -18, rclover: -15, canola: -12 };
+/* Fit of crop c sown in month s0: the lowest of four checks over the months it occupies —
+   temperature (ECOCROP trapezoid on monthly mean, growing months only), rain over the cycle plus the soil water stored at sowing,
+   soil pH, and frost against the killing temperature. Cycle lengths from the ECOCROP typical length up to +2 months are tried
+   (a cover crop may be ended after 2 growing months) and the best is kept. opt.max limits the months available. */
+function fitAt(c, s0, E, opt = {}) {
+  const base = cycleMonths(c), hardy = HARDY[c.id], kill = hardy != null ? hardy : c.ktmp;
+  /* a cover crop is ended before grain, so it only needs to grow: halfway between ECOCROP's minimum and optimum counts as a full fit */
+  const topLo = opt.cover ? (c.tmin + c.topmn) / 2 : c.topmn;
+  const gLo = opt.cover ? Math.min(base, 2) : base, gHi = opt.cover ? base : Math.max(base, Math.min(base + 2, Math.round(c.gmax / 30))), max = Math.min(12, opt.max || 12);
+  /* water already in the root zone at sowing: plant-available water × how wet the three months before were (rain / ET0) */
+  const pre = [1, 2, 3].map(k => (s0 - k + 12) % 12), wet = E.ET ? Math.max(0, Math.min(1, pre.reduce((a, m) => a + E.P[m], 0) / Math.max(1, pre.reduce((a, m) => a + E.ET[m], 0)))) : 0, store = E.paw ? E.paw * wet : 0;
+  let best = null;
+  for (let g = gLo; g <= gHi; g++) {
+    const ms = [], dorm = []; let grown = 0;
+    for (let i = 0; i < max && grown < g; i++) { const m = (s0 + i) % 12; ms.push(m); if (hardy != null && E.T[m] < c.tmin && grown > 0) dorm.push(m); else grown++; }
+    if (grown < g) break;
+    const f = Math.min(1, Math.max(0.3, g * 30 / ((c.gmin + c.gmax) / 2)));
+    let ts = 1, tm = ms[0]; for (const m of ms) { if (dorm.includes(m)) continue; const v = trap(E.T[m], c.tmin, topLo, c.topmx, c.tmax); if (v < ts) { ts = v; tm = m; } }
+    /* all rain in the window (and soil water) counts towards the minimum; only rain in growing months counts as too much */
+    const rain = ms.reduce((a, m) => a + E.P[m], 0), rainEff = rain + store, rainG = ms.filter(m => !dorm.includes(m)).reduce((a, m) => a + E.P[m], 0);
+    let rs = Math.min(rainEff <= c.rmin * f ? 0 : rainEff < c.ropmn * f ? (rainEff - c.rmin * f) / ((c.ropmn - c.rmin) * f) : 1, rainG >= c.rmax * f ? 0 : rainG > c.ropmx * f ? (c.rmax * f - rainG) / ((c.rmax - c.ropmx) * f) : 1);
+    if (E.irr && rainEff < c.ropmn * f) rs = 1;
+    let ks = 1, km = ms[0]; if (E.cold && kill != null) for (const m of ms) { const v = E.cold[m], k = v <= kill ? 0.3 : v <= kill + 2 ? 0.7 : 1; if (k < ks) { ks = k; km = m; } }
+    const ps = trap(E.ph, c.phmin, c.phopmn, c.phopmx, c.phmax), suit = Math.min(ts, rs, ps, ks);
+    if (best && !(suit - 0.05 * (g - gLo) > best.suit - 0.05 * (best.grow - gLo) + 1e-9)) continue;
+    let why = null;
+    if (ks < 1 && ks <= Math.min(ts, rs, ps)) why = { th: `${MTH.th[km]} เสี่ยงน้ำค้างแข็ง (คืนที่หนาวสุดราว ${E.cold[km].toFixed(0)} °C, พืชทนได้ถึง ${kill} °C)`, en: `${MTH.en[km]} frost risk (coldest night about ${E.cold[km].toFixed(0)} °C, crop survives to ${kill} °C)` };
+    else if (suit < 1) {
+      if (ts <= rs && ts <= ps) { const v = E.T[tm]; why = v > c.topmx ? { th: `${MTH.th[tm]} ร้อนเกิน (${v.toFixed(0)} °C, เหมาะสุดไม่เกิน ${c.topmx})`, en: `${MTH.en[tm]} too hot (${v.toFixed(0)} °C, optimum ≤ ${c.topmx})` } : { th: `${MTH.th[tm]} เย็นเกิน (${v.toFixed(0)} °C, เหมาะสุดตั้งแต่ ${topLo})`, en: `${MTH.en[tm]} too cool (${v.toFixed(0)} °C, optimum ≥ ${topLo})` }; }
+      else if (rs <= ps) why = rainEff < c.ropmn * f ? { th: `น้ำช่วงปลูกน้อยเกิน (ฝน ${Math.round(rain)} + น้ำในดิน ${Math.round(store)} mm, ต้องการ ≥ ${Math.round(c.ropmn * f)})`, en: `too little water in the cycle (rain ${Math.round(rain)} + soil water ${Math.round(store)} mm, needs ≥ ${Math.round(c.ropmn * f)})` } : { th: `ฝนช่วงปลูกมากเกิน (${Math.round(rainG)} mm, เหมาะสุด ≤ ${Math.round(c.ropmx * f)})`, en: `too much rain in the cycle (${Math.round(rainG)} mm, optimum ≤ ${Math.round(c.ropmx * f)})` };
+      else why = { th: `pH ดิน ${E.ph} อยู่นอกช่วงเหมาะสุด ${c.phopmn}–${c.phopmx}`, en: `soil pH ${E.ph} outside the optimum ${c.phopmn}–${c.phopmx}` };
+    }
+    best = { c, suit, start: s0, nm: ms.length, grow: g, dorm, ts, rs, ps, tm, rain, store, f, why, pass: suit >= 0.5 };
   }
-  return { c, suit, start: s0, nm, ts, rs, ps, tm, rain, f, why, pass: suit >= 0.5 };
+  return best || { c, suit: 0, start: s0, nm: Math.min(base, max), grow: 0, dorm: [], ts: 0, rs: 0, ps: 0, tm: s0, rain: 0, store: 0, f: 1, why: { th: 'ช่วงว่างสั้นเกินรอบปลูก', en: 'window too short for the crop' }, pass: false };
 }
 function screenCrops(st) {
   if (!CROPDB || !S) return null;
   const E = siteTP(st);
-  return CROPDB.map(c => { let best = null; for (let s0 = 0; s0 < 12; s0++) { const r = fitAt(c, s0, E); if (!best || r.suit > best.suit || (r.suit === best.suit && r.rain > best.rain)) best = r; } return best; }).sort((a, b) => b.suit - a.suit);
+  return CROPDB.map(c => { let best = null; for (let s0 = 0; s0 < 12; s0++) { const r = fitAt(c, s0, E); if (!best || r.suit > best.suit || (r.suit === best.suit && (r.nm < best.nm || (r.nm === best.nm && r.rain > best.rain)))) best = r; } return best; }).sort((a, b) => b.suit - a.suit);
 }
 /* ---------- rotation builder: current crop + screened crops that fit the idle window ---------- */
 const winTxt = (s0, nm, lang) => nm >= 12 ? (lang === 'th' ? 'ทั้งปี' : 'all year') : `${MTH[lang][s0]}–${MTH[lang][(s0 + nm - 1) % 12]}`;
@@ -973,7 +996,7 @@ function kcSeq(c, nm) {
   return Array.from({ length: nm }, (_, i) => i === 0 ? .4 : i === nm - 1 ? end : mid);
 }
 function makePlan(parts, kind, role) {
-  const m = {}; parts.forEach(pt => kcSeq(pt.c, pt.nm).forEach((kc, i) => { m[(pt.start + i) % 12] = [pt.c.id, kc]; }));
+  const m = {}; parts.forEach(pt => kcSeq(pt.c, pt.nm).forEach((kc, i) => { const mm = (pt.start + i) % 12; m[mm] = [pt.c.id, pt.dorm && pt.dorm.includes(mm) ? 0.3 : kc]; }));
   const main = parts[0], add = parts[1], comb = k => 1 - parts.reduce((a, pt) => a * (1 - pt.c[k]), 1);
   const nameOf = l => parts.map(pt => `${pt.c[l]} (${winTxt(pt.start, pt.nm, l)})`).join(' + ');
   const idle = 12 - Object.keys(m).length, rolesOf = (c, l) => c.roles.filter(x => ROLE[x]).map(x => ROLE[x][l]).join(', ');
@@ -1017,8 +1040,7 @@ function buildPlans(st) {
     let best = null;
     for (const x of scr) {
       const c = x.c; if (used.has(c.id) || !c.roles.includes(role) || c.fam === mainC.fam) continue;
-      const nm = cycleMonths(c); if (nm > idleLen) continue;
-      for (let o = 0; o + nm <= idleLen; o++) { const r = fitAt(c, (idle0 + o) % 12, E); if (!r.pass) continue; const sc = r.suit + .15 * (c.om + c.n) + (role === 'deep' ? .2 * c.deep : 0); if (!best || sc > best.sc) best = { r, sc }; }
+      for (let o = 0; o < idleLen; o++) { const r = fitAt(c, (idle0 + o) % 12, E, { max: idleLen - o, cover: role === 'cover' || role === 'nfix' }); if (!r.pass) continue; const sc = r.suit + .15 * (c.om + c.n) + (role === 'deep' ? .2 * c.deep : 0) + (role === 'cover' ? .06 * r.nm : 0); /* a cover crop that protects the soil for more months scores higher */ if (!best || sc > best.sc) best = { r, sc }; }
     }
     if (best) { used.add(best.r.c.id); plans.push(makePlan([main, best.r], 'add', role)); }
   }
@@ -1033,10 +1055,10 @@ function buildPlans(st) {
     cu.err = null;
     const mp = cu.main && by[cu.main] ? by[cu.main] : main, parts = [mp];
     if (cu.add && by[cu.add]) {
-      const c = by[cu.add].c, nm = cycleMonths(c), busyM = new Set(Array.from({ length: mp.nm }, (_, i) => (mp.start + i) % 12)), free = s0 => Array.from({ length: nm }, (_, i) => (s0 + i) % 12).every(m => !busyM.has(m));
+      const c = by[cu.add].c, nm = cycleMonths(c), busyM = new Set(Array.from({ length: mp.nm }, (_, i) => (mp.start + i) % 12)), run = s0 => { let k = 0; while (k < 12 && !busyM.has((s0 + k) % 12)) k++; return k; }, fitIn = s0 => { const r = run(s0); if (!r) return null; const x = fitAt(c, s0, E, { max: r, cover: true }); return x.nm <= r && x.grow ? x : null; };
       let r = null;
-      if (cu.month !== 'auto') { if (free(+cu.month)) r = fitAt(c, +cu.month, E); }
-      else for (let s0 = 0; s0 < 12; s0++) if (free(s0)) { const x = fitAt(c, s0, E); if (!r || x.suit > r.suit || (x.suit === r.suit && x.rain > r.rain)) r = x; }
+      if (cu.month !== 'auto') r = fitIn(+cu.month);
+      else for (let s0 = 0; s0 < 12; s0++) { const x = fitIn(s0); if (x && (!r || x.suit > r.suit || (x.suit === r.suit && x.rain > r.rain))) r = x; }
       if (!r) { cu.err = { th: `${c.th} (${nm} เดือน) ลงในช่วงว่างของ${mp.c.th}ไม่ได้`, en: `${c.en} (${nm} months) does not fit in the idle window of ${mp.c.en}` }; return; }
       parts.push(r);
     } else if (mp === main) { cu.err = { th: 'เหมือนแผนปัจจุบัน เลือกพืชอื่น', en: 'Same as the current rotation; pick another crop' }; return; }
@@ -1211,7 +1233,7 @@ let measureLayer = null, toolBox = null, toolTs = 0; /* toolTs: a toolbar click 
 const hav = (a, b) => { const r = Math.PI / 180, dla = (b[0] - a[0]) * r, dlo = (b[1] - a[1]) * r, q = Math.sin(dla / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dlo / 2) ** 2; return 2 * 6371008.8 * Math.asin(Math.sqrt(q)); };
 const pathLen = (pts, closed) => { let d = 0; for (let i = 1; i < pts.length; i++) d += hav(pts[i - 1], pts[i]); if (closed && pts.length > 2) d += hav(pts.at(-1), pts[0]); return d; };
 const fmtDist = d => d < 1000 ? Math.round(d).toLocaleString() + ' m' : (d / 1000).toFixed(2) + ' km';
-const fmtArea = a => { const rai = a / 1600, r = rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1), ha = (a / 1e4).toFixed(2); return a < 1600 ? `${Math.round(a).toLocaleString()} m²` : t(`${r} ไร่ · ${ha} ha`, `${ha} ha · ${r} rai`); };
+const fmtArea = a => { const rai = a / 1600, r = rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1), ha = (a / 1e4).toFixed(2); return a < 1600 ? `${Math.round(a).toLocaleString()} m²` : t(`${r} ไร่ · ${ha} ha`, `${(a / 4046.86).toFixed(a < 40469 ? 1 : 0)} acres · ${ha} ha`); };
 const MODE_COL = { field: '#ffffff', dist: '#ffd23f', area: '#ffd23f' };
 function drawStart(mode = 'field') {
   if (!map) return; drawStop(); map.closePopup();
@@ -1336,7 +1358,7 @@ function fieldInfo(st, ev, scores) {
   if (F.area < MODIS_PX) warn.push(t(`แปลงเล็กกว่า pixel ดาวเทียม MODIS 1 ช่อง (6.25 ha ≈ 39 ไร่): NDVI และรูปแบบพืชพรรณที่เห็นรวมแปลงข้างเคียงด้วย ใช้ดูแนวโน้มของละแวกนี้ ไม่ใช่ของแปลงนี้โดยเฉพาะ`, `The field is smaller than one MODIS satellite pixel (6.25 ha): the NDVI and vegetation pattern include neighbouring fields. Read them as the neighbourhood, not this field alone`));
   if (distKm > 0.5) warn.push(t(`อากาศและดินที่ใช้คำนวณเป็นของจุดที่วิเคราะห์ ซึ่งห่างจากกลางแปลง ${distKm.toFixed(1)} km`, `Climate and soil are for the analysed point, ${distKm.toFixed(1)} km from the field centre`) + ` <button type="button" class="btn" id="fRe">${t('วิเคราะห์ที่กลางแปลง', 'Analyse at the field centre')}</button>`);
   $('fieldBody').innerHTML = `<div class="tiles">
-      <div>${t('พื้นที่', 'Area')}<b>${rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1)} ${t('ไร่', 'rai')}</b>${ha.toFixed(2)} ha · ${t('กลางแปลง', 'centre')} ${fmtLL(F.lat, F.lon)}</div>
+      <div>${t('พื้นที่', 'Area')}<b>${LANG === 'en' ? (F.area / 4046.86).toFixed(F.area < 40469 ? 1 : 0) + ' acres' : (rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1)) + ' ไร่'}</b>${ha.toFixed(2)} ha · ${LANG === 'en' ? (rai >= 100 ? Math.round(rai).toLocaleString() : rai.toFixed(1)) + ' rai' : (F.area / 4046.86).toFixed(1) + ' acres'} · ${t('กลางแปลง', 'centre')} ${fmtLL(F.lat, F.lon)}</div>
       <div>${t('ความลาดชันในแปลง', 'Slope inside the field')}<b>${sl.length ? (sl.reduce((a, b) => a + b, 0) / sl.length).toFixed(1) + '%' : '—'}</b>${sl.length ? t('สูงสุด ', 'max ') + Math.max(...sl).toFixed(1) + '% · ' + sl.length + t(' จุด (SRTM 30 m)', ' samples (SRTM 30 m)') : t('ไม่มีข้อมูลความสูง', 'no elevation data')}</div>
       <div>${t('พื้นที่ที่ชันเกิน 5%', 'Area steeper than 5%')}<b>${hiRisk == null ? '—' : Math.round(hiRisk * 100) + '%'}</b>${cells.length} ${t(`ช่อง ${GRID.cell} m ในแปลง`, `cells of ${GRID.cell} m in the field`)}</div>
       <div>${t('รูปแบบพืชพรรณ (กฎ)', 'Vegetation pattern (rules)')}<b style="font-size:.9rem">${pat}</b>MODIS 250 m</div>

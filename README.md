@@ -40,7 +40,7 @@ Nothing is precomputed. Every site is fetched live in the browser.
 | Soil (supplementary) | SoilGrids 2.0 (ISRIC) | REST API + WMS |
 | Base map (display only) | Esri World Imagery, OpenStreetMap | tiles |
 
-Methods: reference evapotranspiration and crop coefficients follow FAO-56 (Allen et al. 1998). Frost risk compares the coldest night of each month with the ECOCROP killing temperature. Plant-available water uses Saxton & Rawls (2006). The slope factor is the RUSLE S factor (McCool et al.). Trends use Mann-Kendall with Sen's slope.
+Methods: reference evapotranspiration and crop coefficients follow FAO-56 (Allen et al. 1998). Frost risk compares the coldest night of each month with the ECOCROP killing temperature. Crop screening also tries cycle lengths up to two months longer than typical, credits soil water stored at sowing, lets winter-hardy cover crops (rye, wheat, barley, vetch, red clover, canola) go dormant through cold months using approximate hardiness from extension guides, and gives no advice on cells that MODIS sees as built-up, water or bare all year. Plant-available water uses Saxton & Rawls (2006). The slope factor is the RUSLE S factor (McCool et al.). Trends use Mann-Kendall with Sen's slope.
 
 ## Run locally
 

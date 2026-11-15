@@ -508,6 +508,9 @@ function links() {
 
 /* ---------- charts & tiles ---------- */
 function drawCharts() {
+  { const el = $('etSrc'), e = S && S.et; if (el && e) el.textContent = e.pm >= 0.9
+      ? t(`NASA POWER 2001–2025 · ET₀: FAO-56 Penman-Monteith (แดด ความชื้น ลม อุณหภูมิ) · ต่างจากสูตร Hargreaves ที่ใช้แค่อุณหภูมิ ${e.diff >= 0 ? '+' : ''}${Math.round(e.diff * 100)}%`, `NASA POWER 2001–2025 · ET₀: FAO-56 Penman-Monteith (sun, humidity, wind, temperature) · ${e.diff >= 0 ? '+' : ''}${Math.round(e.diff * 100)}% versus temperature-only Hargreaves`)
+      : t(`NASA POWER 2001–2025 · ET₀: Penman-Monteith ${Math.round(e.pm * 100)}% ของวัน ที่เหลือใช้ Hargreaves (ข้อมูลแดด/ความชื้น/ลมขาด)`, `NASA POWER 2001–2025 · ET₀: Penman-Monteith on ${Math.round(e.pm * 100)}% of days, Hargreaves on the rest (sun/humidity/wind missing)`); }
   if (!window.Chart) return;
   Chart.defaults.color = css('--muted'); Chart.defaults.borderColor = css('--line'); Chart.defaults.font.family = 'IBM Plex Sans Thai, system-ui, sans-serif';
   for (const k in charts) { charts[k].destroy(); delete charts[k]; }
@@ -577,7 +580,7 @@ async function getJSON(url, ms = 30000, opts = {}) {
   try { const r = await fetch(url, { ...opts, signal: ac.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
   finally { clearTimeout(tm); }
 }
-const powerURL = (lat, lon, start, end, params = 'T2M_MAX,T2M_MIN,PRECTOTCORR') =>
+const powerURL = (lat, lon, start, end, params = 'T2M_MAX,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN,RH2M,WS2M') =>
   `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=${params}&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&start=${start}&end=${end}&format=JSON`;
 function raFn(lat) {
   const phi = lat * Math.PI / 180;
@@ -585,15 +588,30 @@ function raFn(lat) {
     const ws = Math.acos(Math.max(-1, Math.min(1, -Math.tan(phi) * Math.tan(d))));
     return 24 * 60 / Math.PI * 0.082 * dr * (ws * Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.sin(ws)); };
 }
-/* Daily POWER → {days:[{k,y,m,tx,tn,p,et}], clim, annual, yearly}. ET0 = Hargreaves; same method as pipeline/build_site.py */
-function buildClimate(param, lat) {
-  const Ra = raFn(lat), days = [];
+/* Daily POWER → {days:[{k,y,m,tx,tn,p,et}], clim, annual, yearly}.
+   ET0 = FAO-56 Penman-Monteith (Allen et al. 1998, eq. 6) from POWER solar radiation, relative humidity and 2 m wind;
+   a day with any of those missing falls back to Hargreaves, which needs temperature only. */
+function buildClimate(param, lat, elev = 0) {
+  const Ra = raFn(lat), days = [], RS = param.ALLSKY_SFC_SW_DWN, RH = param.RH2M, WS = param.WS2M;
+  let pmN = 0, sumPM = 0, sumHG = 0;
+  /* POWER's AG community reports radiation in MJ/m²/day; other communities use kWh/m²/day (3.6× smaller) */
+  let rsF = 1; if (RS) { const v = Object.values(RS).filter(x => x > 0); if (v.length && v.reduce((a, b) => a + b, 0) / v.length < 9) rsF = 3.6; }
+  const z = Math.max(-400, Math.min(6000, +elev || 0)), Pz = 101.3 * Math.pow((293 - 0.0065 * z) / 293, 5.26), gam = 0.000665 * Pz;
+  const e0 = T => 0.6108 * Math.exp(17.27 * T / (T + 237.3));
+  const pm = (tx, tn, rs, rh, u2, ra) => {
+    const T = (tx + tn) / 2, es = (e0(tx) + e0(tn)) / 2, ea = Math.min(es, rh / 100 * es), D = 4098 * e0(T) / Math.pow(T + 237.3, 2);
+    const rso = (0.75 + 2e-5 * z) * ra, rnl = 4.903e-9 * (Math.pow(tx + 273.16, 4) + Math.pow(tn + 273.16, 4)) / 2 * (0.34 - 0.14 * Math.sqrt(ea)) * (1.35 * Math.min(1, rs / rso) - 0.35);
+    const rn = 0.77 * rs - rnl;
+    return Math.max(0, (0.408 * D * rn + gam * 900 / (T + 273) * u2 * (es - ea)) / (D + gam * (1 + 0.34 * u2)));
+  };
   for (const k of Object.keys(param.T2M_MAX)) {
     const tx = param.T2M_MAX[k], tn = param.T2M_MIN[k], p = param.PRECTOTCORR[k];
     if (tx < -900 || tn < -900 || p < -900) continue;
     const y = +k.slice(0, 4), m = +k.slice(4, 6) - 1, dt = Date.UTC(y, m, +k.slice(6, 8));
     const doy = Math.floor((dt - Date.UTC(y, 0, 0)) / 864e5);
-    const et = 0.0023 * 0.408 * Ra(doy) * ((tx + tn) / 2 + 17.8) * Math.sqrt(Math.max(tx - tn, 0));
+    const ra = Ra(doy), hg = 0.0023 * 0.408 * ra * ((tx + tn) / 2 + 17.8) * Math.sqrt(Math.max(tx - tn, 0));
+    let et = hg; const rs = RS && RS[k] * rsF, rh = RH && RH[k], u2 = WS && WS[k];
+    if (rs > 0 && rs < 45 && rh > 0 && rh <= 100 && u2 >= 0 && u2 < 30 && ra > 0) { et = pm(tx, tn, rs, rh, u2, ra); pmN++; sumPM += et; sumHG += hg; }
     days.push({ k, y, m, tx, tn, p, et });
   }
   const yearly = {}, tx = {};
@@ -607,7 +625,7 @@ function buildClimate(param, lat) {
   const tmaxM = Array.from({ length: 12 }, (_, m) => mean(days.filter(d => d.m === m).map(d => d.tx)));
   const clim = Array.from({ length: 12 }, (_, m) => [+mean(ys.map(y => y[m][0])).toFixed(1), +mean(ys.map(y => y[m][1])).toFixed(1), +tmaxM[m].toFixed(1), +mean(ys.map(y => y[m][2])).toFixed(1), 0]);
   const annual = Object.keys(yearly).map(y => [+y, yearly[y].reduce((s, r) => s + r[0], 0), +mean(tx[y]).toFixed(2), yearly[y].reduce((s, r) => s + r[2], 0), yearly[y].slice(0, 4).reduce((s, r) => s + r[0], 0)]);
-  return { days, clim, annual, yearly };
+  return { days, clim, annual, yearly, et: { pm: pmN / (days.length || 1), diff: sumHG ? sumPM / sumHG - 1 : null } };
 }
 /* SoilGrids → soil props (port of soil_props in build_site.py; Saxton & Rawls 2006) */
 /* Saxton & Rawls (2006) plant-available water fraction for sand, clay (0–1) and organic matter (%) */
@@ -728,7 +746,7 @@ async function loadLive(lat, lon) {
     const sgv = await Promise.race([soilP, new Promise(r => setTimeout(() => r(undefined), 5000))]);
     if (seq !== loadSeq) return;
     let cl = null;
-    if (pw.status === 'fulfilled') { try { cl = buildClimate(pw.value.properties.parameter, lat); } catch (e) {} }
+    if (pw.status === 'fulfilled') { try { const g = pw.value.geometry && pw.value.geometry.coordinates; cl = buildClimate(pw.value.properties.parameter, lat, g && g[2]); } catch (e) {} }
     if (!cl || cl.days.length < 3650) {
       setStatus('power', 'err', () => t('ดึงไม่ได้', 'failed')); ['soil', 'slope'].forEach(k => setStatus(k, 'wait', ''));
       $('liveTitle').textContent = t('ดึงข้อมูลภูมิอากาศจาก NASA POWER ไม่ได้ (อาจเป็นจุดในทะเล หรือเซิร์ฟเวอร์ไม่ตอบ)', 'Could not get climate from NASA POWER (ocean point, or the server did not answer)');
@@ -747,7 +765,7 @@ async function loadLive(lat, lon) {
       } else setStatus('soil', 'err', () => t('ไม่มีค่า ใช้ค่าสมมติ', 'no value; assumed')); }
     const dem = slp.status === 'fulfilled' ? slp.value : null, slopeSamples = dem ? dem.samples : [];
     setStatus('slope', slopeSamples.length ? 'ok' : 'err', slopeSamples.length ? pct(slopeSamples, .5).toFixed(0) + '%' : () => t('ดึงไม่ได้', 'failed'));
-    site = { lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, soil, soilFallback, slopeSamples, dem, fetched: isoDay(Date.now()) };
+    site = { lat, lon, clim: cl.clim, annual: cl.annual, yearly: cl.yearly, days: cl.days, et: cl.et, soil, soilFallback, slopeSamples, dem, fetched: isoDay(Date.now()) };
     liveCache.set(key, site);
   } else { setStatus('power', 'ok', () => t('จากแคช', 'cached')); setStatus('soil', site.soilFallback ? 'err' : 'ok', 'pH ' + site.soil.ph); setStatus('slope', site.slopeSamples.length ? 'ok' : 'err', ''); }
   applySite(site);

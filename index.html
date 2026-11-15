@@ -989,7 +989,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
   <section class="block">
     <details class="fold" data-fold="f-4"><summary><h2><span class="th">อากาศและพืชพรรณของจุดนี้</span><span class="en">Climate and vegetation at this point</span></h2></summary>
     <div class="charts">
-      <div><div class="chartbox"><canvas id="cClim"></canvas></div><p class="src">NASA POWER 2001–2025 · ET₀: Hargreaves</p></div>
+      <div><div class="chartbox"><canvas id="cClim"></canvas></div><p class="src" id="etSrc">NASA POWER 2001–2025 · ET₀: FAO-56 Penman-Monteith</p></div>
       <div><div class="chartbox"><canvas id="cNdvi"></canvas></div><p class="src" id="ndviNote"></p></div>
     </div>
     </details>
@@ -1024,7 +1024,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
     <div class="tbl"><table>
       <thead><tr><th><span class="th">เกณฑ์</span><span class="en">Criterion</span></th><th><span class="th">คำนวณจาก</span><span class="en">Computed from</span></th><th><span class="th">ข้อมูล</span><span class="en">Data</span></th></tr></thead>
       <tbody>
-        <tr><td><span class="th">น้ำที่ต้องเติม</span><span class="en">Irrigation need</span></td><td>Σ max(0, ET₀×Kc − 0.8×P) <span class="th">ต่อปี 25 ปี → ค่าเฉลี่ย และ P80 (ปีแล้ง 1 ใน 5)</span><span class="en">per year over 25 years → mean and P80 (1-in-5 dry year)</span></td><td>NASA POWER, Kc FAO-56</td></tr>
+        <tr><td><span class="th">น้ำที่ต้องเติม</span><span class="en">Irrigation need</span></td><td>Σ max(0, ET₀×Kc − 0.8×P) <span class="th">ต่อปี 25 ปี → ค่าเฉลี่ย และ P80 (ปีแล้ง 1 ใน 5)</span><span class="en">per year over 25 years → mean and P80 (1-in-5 dry year)</span></td><td>NASA POWER (T2M_MAX, T2M_MIN, PRECTOTCORR, ALLSKY_SFC_SW_DWN, RH2M, WS2M), ET₀ FAO-56 Penman-Monteith, Kc FAO-56</td></tr>
         <tr><td><span class="th">ความร้อน</span><span class="en">Heat stress</span></td><td><span class="th">วัน Tmax ≥ 35 °C ตอนมีพืช × ความไวของพืช</span><span class="en">Days Tmax ≥ 35 °C during crop months × crop sensitivity</span></td><td>NASA POWER</td></tr>
         <tr><td><span class="th">กันดินพัง</span><span class="en">Erosion control</span></td><td><span class="th">ฝนที่ตกตอนดินไม่มีพืชคลุม (แนวคิด C factor) · แผนที่: S factor ของ RUSLE (McCool) จาก slope รายช่อง 60 m</span><span class="en">Rain falling on uncovered soil (C-factor idea) · map: RUSLE S factor (McCool) from slope per 60 m cell</span></td><td>NASA POWER, SRTM</td></tr>
         <tr><td><span class="th">อินทรียวัตถุ / ไนโตรเจน / pH</span><span class="en">Organic matter / N / pH</span></td><td><span class="th">บทบาทพืช ปรับด้วยค่าดินจริง (อินทรียวัตถุต่ำ → ให้น้ำหนักมากขึ้น, pH นอกช่วง → หักคะแนน)</span><span class="en">Crop roles, adjusted by measured soil (low OM → higher weight; pH outside range → penalty)</span></td><td><span class="th">กฎทางเกษตร + SoilGrids</span><span class="en">Agronomic rules + SoilGrids</span></td></tr>
@@ -1041,7 +1041,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
         <tr><td><span class="th">รายได้</span><span class="en">Income</span></td><td><span class="th">ผู้ใช้ตั้งเอง</span><span class="en">User-set</span></td><td><span class="th">ไม่มีใน NASA</span><span class="en">Not in NASA data</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note" style="margin-top:8px"><span class="th">Scenario: ET₀ +2.2% ต่อ +1 °C (ความไวของ Hargreaves), วันร้อน +30% ต่อ +1 °C (ประมาณ), ฝนปรับตามสัดส่วนทุกเดือน · ข้อจำกัด: ภูมิอากาศ ~50 km และดิน 250 m เป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจาก slope เท่านั้น · แผนหมุนเวียน 5 แบบเป็นชุดตั้งต้นสำหรับพืชไร่เขตร้อน ยังไม่ได้คัดพืชตามจุด</span><span class="en">Scenario: ET₀ +2.2% per +1 °C (Hargreaves sensitivity), hot days +30% per +1 °C (approximate), rainfall scaled monthly · Limits: climate (~50 km) and soil (250 m) are single values for the grid, so cells differ only by slope · the 5 rotations are a starter set for tropical field crops, not yet screened per point</span></p>
+    <p class="note" style="margin-top:8px"><span class="th">ET₀ ใช้สูตร FAO-56 Penman-Monteith จากแดด ความชื้น ลม และอุณหภูมิของ NASA POWER (วันที่ข้อมูลขาดใช้ Hargreaves แทน) · Scenario: ET₀ +2.2% ต่อ +1 °C (ประมาณ), วันร้อน +30% ต่อ +1 °C (ประมาณ), ฝนปรับตามสัดส่วนทุกเดือน · ข้อจำกัด: ภูมิอากาศ ~50 km และดิน 250 m เป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชันและพืชพรรณ</span><span class="en">ET₀ uses FAO-56 Penman-Monteith from NASA POWER sunshine, humidity, wind and temperature (Hargreaves on days with missing data) · Scenario: ET₀ +2.2% per +1 °C (approx.), hot days +30% per +1 °C (approx.), rain scaled in every month · Limits: climate (~50 km) and soil (250 m) are one value across the grid; cells differ by slope and vegetation</span></p>
     </details>
   </section>
 
@@ -1098,7 +1098,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <button type="button" id="mobToggle"></button>
-<script src="app.js?v=07ed0b52"></script>
+<script src="app.js?v=fdfe8ec1"></script>
 
 </body>
 </html>

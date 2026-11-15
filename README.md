@@ -19,7 +19,7 @@ The user sets their own priorities and farm constraints, and can add their own r
 
 ## How it works
 
-1. **Climate.** 25 years of daily NASA POWER data give monthly rain, reference evapotranspiration (Hargreaves) and hot days. The last 90 days are compared with the same window in 2001–2025.
+1. **Climate.** 25 years of daily NASA POWER data give monthly rain, reference evapotranspiration (FAO-56 Penman-Monteith from POWER sunshine, humidity and wind; Hargreaves on days with missing data) and hot days. The last 90 days are compared with the same window in 2001–2025.
 2. **Crop screening.** 38 crops in 8 types are checked against the site: monthly temperature, rain over the growing cycle, and soil pH, each as an ECOCROP tolerance range. The fit is the lowest of the three; a crop passes at 50 % or more.
 3. **Rotation builder.** The current crop is chosen by the user (or guessed from climate and labelled as a guess). The tool finds the idle months and adds a passing crop for each role (nitrogen-fixing, cover, deep-rooted, drought-tolerant) from a different plant family, plus options that switch the main crop. Users can add up to four rotations of their own.
 4. **Scoring.** Each rotation gets a water balance over all 25 years (average and 1-in-5 dry year), heat exposure, rain falling on bare soil, soil-health and pest-break scores. Sliders set the weights; scenario sliders change rain (±30 %) and temperature (+0–2 °C).
@@ -32,7 +32,7 @@ Nothing is precomputed. Every site is fetched live in the browser.
 
 | Role | Dataset | Access |
 |---|---|---|
-| Climate 2001–2025 and the last 90 days | **NASA POWER** daily (T2M_MAX, T2M_MIN, PRECTOTCORR) | POWER API |
+| Climate 2001–2025 and the last 90 days | **NASA POWER** daily (T2M_MAX, T2M_MIN, PRECTOTCORR, ALLSKY_SFC_SW_DWN, RH2M, WS2M) | POWER API |
 | Vegetation around the point, last year | **MODIS Terra 16-day NDVI, 250 m** (MOD13Q1) | **NASA GIBS** image tiles, decoded with the layer's own colour map. Fallback: ORNL DAAC MODIS Web Service (true values + pixel reliability) |
 | Slope, 30 m grid | SRTM-derived elevation (AWS Terrain Tiles) | public tiles |
 | Map layers by date | **NASA GIBS**: MODIS true colour, NDVI, land surface temperature, SMAP root-zone soil moisture, GPM IMERG rain, VIIRS fires | GIBS WMTS / WMS |
@@ -40,7 +40,7 @@ Nothing is precomputed. Every site is fetched live in the browser.
 | Soil (supplementary) | SoilGrids 2.0 (ISRIC) | REST API + WMS |
 | Base map (display only) | Esri World Imagery, OpenStreetMap | tiles |
 
-Methods: crop coefficients follow FAO-56 (Table 12). Plant-available water uses Saxton & Rawls (2006). The slope factor is the RUSLE S factor (McCool et al.). Trends use Mann-Kendall with Sen's slope.
+Methods: reference evapotranspiration and crop coefficients follow FAO-56 (Allen et al. 1998). Frost risk compares the coldest night of each month with the ECOCROP killing temperature. Plant-available water uses Saxton & Rawls (2006). The slope factor is the RUSLE S factor (McCool et al.). Trends use Mann-Kendall with Sen's slope.
 
 ## Run locally
 

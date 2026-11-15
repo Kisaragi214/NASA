@@ -486,7 +486,7 @@ function legend(rec) {
   if (mapMode === 'erosion') h = [t('ต่ำมาก', 'Very low'), t('ต่ำ', 'Low'), t('ปานกลาง', 'Medium'), t('สูง', 'High'), t('สูงมาก', 'Very high')].map((nm, i) => `<span><i style="background:${RISK_COL[i]}"></i>${nm}</span>`).join('') + `<p class="note">${(GRID.hasCover ? t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM 30 m) × พืชคลุมดินช่วงต่ำสุด (MODIS 250 m ปรับลงกริดเดียวกัน) จัด 5 ระดับเทียบกันในกริด', 'RUSLE slope factor S (SRTM, 30 m) × low-season ground cover (MODIS 250 m resampled to the same grid), quintiles within the grid') : t('ปัจจัยความลาดชัน S ของ RUSLE (SRTM) จัด 5 ระดับเทียบกันในกริด · จะคูณด้วยพืชคลุมดินเมื่อ NDVI โหลดเสร็จ', 'RUSLE slope factor S (SRTM), quintiles within the grid · ground cover is applied once NDVI has loaded'))}</p>`;
   else if (mapMode === 'slope') h = [['< 2%'], ['2–5%'], ['5–8%'], ['8–12%'], ['> 12%']].map(([nm], i) => `<span><i style="background:${SLOPE_COL[i]}"></i>${nm}<b>${count(p => !isNaN(cellInfo(p).slope) && SLOPE_BRK.filter(b => cellInfo(p).slope > b).length === i)}</b></span>`).join('') + `<p class="note">${t('ความชันเฉลี่ยในแต่ละช่อง จาก DEM ที่ทำจาก SRTM', 'Mean slope per cell from the SRTM-derived DEM')}</p>`;
   else if (mapMode === 'rec' && !rec) h = `<p class="note">${t('กำลังสร้างแผน…', 'Building rotations…')}</p>`;
-  else if (mapMode === 'rec' && rec) h = R.map((r, i) => `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
+  else if (mapMode === 'rec' && rec) h = R.map((r, i) => count(p => rec[p] === i) === '0%' ? '' : `<span><i style="background:${PLAN_COL[i]}"></i>${r.id} · ${L2(r.name)}<b>${count(p => rec[p] === i)}</b></span>`).join('') + (rec.some(v => v < 0) ? `<span><i style="background:#888;opacity:.4"></i>${t('ไม่มีข้อมูลความสูง', 'No elevation data')}<b>${count(p => rec[p] < 0)}</b></span>` : '') + `<p class="note">${t('ภูมิอากาศและดินเป็นค่าเดียวทั้งกริด ความต่างระหว่างช่องมาจากความลาดชัน', 'Climate and soil are uniform across the grid; cells differ by slope')}</p>`;
   $('legend').innerHTML = h + `<p class="note">${gridNote}</p>`;
 }
 function cellHTML(p) {
@@ -617,11 +617,17 @@ async function demSampler(lat, lon) {
     const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => { ctx.drawImage(im, i * 256, j * 256); ok(); }; im.onerror = no;
     im.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${(x0 + i + n) % n}/${y0 + j}.png`; }))));
   const px = ctx.getImageData(0, 0, 768, 768).data;
-  const el = (X, Y) => { X = Math.max(0, Math.min(767, Math.round(X))); Y = Math.max(0, Math.min(767, Math.round(Y))); const k = (Y * 768 + X) * 4; return px[k] * 256 + px[k + 1] + px[k + 2] / 256 - 32768; };
+  /* SRTM heights are whole metres: a 1 m step between neighbouring ~18 m pixels would read as a 5 % slope on flat land.
+     So the heights are averaged over 5×5 pixels (~90 m) and the gradient is taken over ±2 pixels. */
+  const N = 768, raw = new Float32Array(N * N), E = new Float32Array(N * N), tmp = new Float32Array(N * N);
+  for (let k = 0; k < N * N; k++) raw[k] = px[k * 4] * 256 + px[k * 4 + 1] + px[k * 4 + 2] / 256 - 32768;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let a = 0, c = 0; for (let d = -2; d <= 2; d++) { const q = x + d; if (q >= 0 && q < N) { a += raw[y * N + q]; c++; } } tmp[y * N + x] = a / c; }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let a = 0, c = 0; for (let d = -2; d <= 2; d++) { const q = y + d; if (q >= 0 && q < N) { a += tmp[q * N + x]; c++; } } E[y * N + x] = a / c; }
+  const el = (X, Y) => E[Math.max(0, Math.min(767, Math.round(Y))) * N + Math.max(0, Math.min(767, Math.round(X)))];
   const res = 156543.03392 * Math.cos(r) / n;
   const toXY = (la, lo) => { const rr = la * Math.PI / 180; return [((lo + 180) / 360 * n - x0) * 256, ((1 - Math.log(Math.tan(rr) + 1 / Math.cos(rr)) / Math.PI) / 2 * n - y0) * 256]; };
   const elB = (X, Y) => { const x0 = Math.floor(X), y0 = Math.floor(Y), tx = X - x0, ty = Y - y0; return el(x0, y0) * (1 - tx) * (1 - ty) + el(x0 + 1, y0) * tx * (1 - ty) + el(x0, y0 + 1) * (1 - tx) * ty + el(x0 + 1, y0 + 1) * tx * ty; };
-  const slope = (la, lo) => { const [X, Y] = toXY(la, lo); return Math.hypot((elB(X + 1, Y) - elB(X - 1, Y)) / (2 * res), (elB(X, Y + 1) - elB(X, Y - 1)) / (2 * res)) * 100; };
+  const slope = (la, lo) => { const [X, Y] = toXY(la, lo); return Math.hypot((elB(X + 2, Y) - elB(X - 2, Y)) / (4 * res), (elB(X, Y + 2) - elB(X, Y - 2)) / (4 * res)) * 100; };
   const samples = [], dLat = 125 / 111320 / 3, dLon = 125 / (111320 * Math.cos(r)) / 3;
   for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) samples.push(slope(lat + a * dLat, lon + b * dLon));
   return { slope, samples };
@@ -1136,7 +1142,7 @@ const MODE_COL = { field: '#ffffff', dist: '#ffd23f', area: '#ffd23f' };
 function drawStart(mode = 'field') {
   if (!map) return; drawStop(); map.closePopup();
   drawing = { mode, pts: [], line: L.polyline([], { color: MODE_COL[mode], weight: 3, dashArray: '6 5', interactive: false }).addTo(map), dots: L.layerGroup().addTo(map) };
-  map.getContainer().style.cursor = 'crosshair'; fieldMsg = null; fieldUI();
+  map.getContainer().style.cursor = 'crosshair'; fieldMsg = null; if (gridOverlay) gridOverlay.setOpacity(0); fieldUI();
 }
 function drawPoint(ll) {
   const d = drawing, near = p => map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(p)) < 14;
@@ -1148,7 +1154,7 @@ function drawRedraw() {
   d.pts.forEach((p, i) => L.circleMarker(p, { radius: i ? 4 : 7, color: '#ffffff', weight: 2, fillColor: i ? '#2f7d4f' : '#c4512b', fillOpacity: 1, interactive: false }).addTo(d.dots));
   fieldUI();
 }
-function drawStop() { if (!drawing) return; map.removeLayer(drawing.line); map.removeLayer(drawing.dots); drawing = null; map.getContainer().style.cursor = ''; }
+function drawStop() { if (!drawing) return; map.removeLayer(drawing.line); map.removeLayer(drawing.dots); drawing = null; map.getContainer().style.cursor = ''; if (gridOverlay) gridOverlay.setOpacity(+$('opac').value / 100); }
 const drawMin = () => drawing && drawing.mode === 'dist' ? 2 : 3;
 function drawReadout() {
   const d = drawing; if (!d || !d.pts.length) return '';
@@ -1230,7 +1236,7 @@ function fieldUI() {
   mapTools();
   const el = $('fieldCtl'); if (!el) return;
   el.innerHTML = `${FIELD ? `<button type="button" class="btn" id="fExp">${t('บันทึกแปลงเป็นไฟล์', 'Save field to file')}</button>` : ''}<button type="button" class="btn" id="fImp">${t('เปิดไฟล์แปลง (GeoJSON)', 'Open field file (GeoJSON)')}</button>`
-    + `<p class="note" style="margin:6px 0 0;flex-basis:100%">${fieldMsg ? '⚠ ' + L2(fieldMsg) : FIELD ? t('วาดแปลงแล้ว ผลอยู่ในหัวข้อ "แปลงของฉัน" ด้านล่าง กริดบนแผนที่แสดงเฉพาะในแปลง', 'Field drawn. Results are under "My field" below; the map grid shows only inside the field') : t('กดปุ่ม "วาดแปลง" ที่มุมขวาบนของแผนที่ แล้วแตะมุมแปลงทีละจุด จะได้พื้นที่ ความลาดชัน และน้ำที่ต้องใช้ของแปลงนั้น', 'Press "Draw field" at the top right of the map, then tap each corner. You get the area, slope and water need of that field')}</p>`;
+    + `<p class="note" style="margin:6px 0 0;flex-basis:100%">${fieldMsg ? '⚠ ' + L2(fieldMsg) : FIELD ? t('วาดแปลงแล้ว ผลของแปลงอยู่ใต้แผนที่ กริดบนแผนที่แสดงเฉพาะในแปลง', 'Field drawn. Its results are right below the map; the map grid shows only inside the field') : t('กดปุ่ม "วาดแปลง" ที่มุมขวาบนของแผนที่ แล้วแตะมุมแปลงทีละจุด จะได้พื้นที่ ความลาดชัน และน้ำที่ต้องใช้ของแปลงนั้น', 'Press "Draw field" at the top right of the map, then tap each corner. You get the area, slope and water need of that field')}</p>`;
   const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
   on('fExp', fieldExport); on('fImp', () => $('fieldFile').click());
 }
@@ -1296,7 +1302,7 @@ $('geoBtn').onclick = () => {
     () => { $('coordMsg').textContent = t('ไม่ได้รับอนุญาตให้ใช้ตำแหน่ง พิมพ์พิกัดหรือคลิกแผนที่แทน', 'Location not allowed; type coordinates or click the map instead'); }, { timeout: 15000, maximumAge: 600000 });
 };
 document.body.dataset.lang = LANG;
-setLang(LANG); initMap();
+setLang(LANG); initMap(); fieldUI();
 $('liveList').innerHTML = liveStatusHTML();
 { const mq = matchMedia('(prefers-color-scheme: dark)'), root = document.documentElement, btn = $('themeBtn');
   const isDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : mq.matches;

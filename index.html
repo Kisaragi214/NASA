@@ -853,6 +853,15 @@ table.cmp th{vertical-align:bottom;min-width:92px}
       <div class="row" style="flex-wrap:nowrap"><input id="coordIn" type="text" placeholder="15.18N 101.13E" style="flex:1;min-width:0;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"><button type="submit" class="btn"><span class="th">วิเคราะห์</span><span class="en">Analyse</span></button></div>
       <p class="note" id="coordMsg"><span class="th">เช่น 30.9N 75.85E หรือ 31.2S 60.5W · หรือคลิกตรงไหนก็ได้บนแผนที่</span><span class="en">e.g. 30.9N 75.85E or 31.2S 60.5W · or click anywhere on the map</span></p>
     </form>
+    <div>
+      <div class="lbl"><span class="th">ผลวิเคราะห์ (แถบรวม)</span><span class="en">Analysis (combined)</span></div>
+      <div class="row" id="layerBtns"></div>
+      <div class="ctl" style="margin-top:6px">
+        <label for="opac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oOpac">70%</output></label>
+        <input id="opac" type="range" min="0" max="100" value="70">
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
     <div id="liveBox">
       <div class="lbl"><span class="th">ข้อมูล NASA สด</span><span class="en">Live NASA data</span></div>
       <p class="note" id="liveTitle"></p>
@@ -863,15 +872,6 @@ table.cmp th{vertical-align:bottom;min-width:92px}
       <div class="lbl"><span class="th">แปลงของฉัน</span><span class="en">My field</span></div>
       <div class="row" id="fieldCtl"></div>
       <input type="file" id="fieldFile" accept=".geojson,.json,application/geo+json,application/json" hidden>
-    </div>
-    <div>
-      <div class="lbl"><span class="th">ผลวิเคราะห์ (แถบรวม)</span><span class="en">Analysis (combined)</span></div>
-      <div class="row" id="layerBtns"></div>
-      <div class="ctl" style="margin-top:6px">
-        <label for="opac"><span><span class="th">ความทึบ</span><span class="en">Opacity</span></span><output id="oOpac">70%</output></label>
-        <input id="opac" type="range" min="0" max="100" value="70">
-      </div>
-      <div class="legend" id="legend"></div>
     </div>
     <details open>
       <summary class="lbl" style="cursor:pointer"><span class="th">แถบสแกนดาวเทียม (แยกชุดข้อมูล)</span><span class="en">Satellite layers (one dataset each)</span></summary>
@@ -898,6 +898,11 @@ table.cmp th{vertical-align:bottom;min-width:92px}
     </div>
   </div>
 </section>
+
+  <section class="block" id="fieldSec" hidden style="margin-top:16px">
+    <h2><span class="th">แปลงของฉัน</span><span class="en">My field</span></h2>
+    <div id="fieldBody"></div>
+  </section>
 
 <div class="grid">
 <aside class="rail" aria-label="Settings">
@@ -942,11 +947,6 @@ table.cmp th{vertical-align:bottom;min-width:92px}
   <section class="block">
     <h2><span class="th">เทียบแผนหมุนเวียน</span><span class="en">Rotation comparison</span></h2>
     <div class="cards" id="cards"></div>
-  </section>
-
-  <section class="block" id="fieldSec" hidden>
-    <h2><span class="th">แปลงของฉัน</span><span class="en">My field</span></h2>
-    <div id="fieldBody"></div>
   </section>
 
   <section class="block">
@@ -1056,7 +1056,7 @@ table.cmp th{vertical-align:bottom;min-width:92px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <button type="button" id="mobToggle"></button>
-<script src="app.js?v=6147d75d"></script>
+<script src="app.js?v=451ea3ac"></script>
 
 </body>
 </html>

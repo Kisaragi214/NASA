@@ -338,16 +338,16 @@ const SAT = [
   { id: 'none', l: { th: 'ไม่แสดง', en: 'None' } },
   { id: 'truecolor', gibs: 'MODIS_Terra_CorrectedReflectance_TrueColor', level: 9, fmt: 'jpg', lag: 1, res: '250 m', src: 'NASA MODIS Terra', l: { th: 'ภาพสีจริง', en: 'True colour' },
     key: { th: 'ภาพถ่ายจริงของวันนั้น (หน้าฝนมักมีเมฆ)', en: 'Actual image for that day (often cloudy in the rainy season)' } },
-  { id: 'ndvi', gibs: 'MODIS_Terra_NDVI_8Day', level: 9, fmt: 'png', lag: 3, res: '250 m', src: 'NASA MODIS Terra NDVI 8-day', l: { th: 'พืชพรรณ NDVI', en: 'Vegetation NDVI' },
+  { id: 'ndvi', gibs: 'MODIS_Terra_L3_NDVI_16Day', level: 9, fmt: 'png', lag: 30, period: 16, res: '250 m', src: 'NASA MODIS Terra NDVI, 16-day composite', l: { th: 'พืชพรรณ NDVI', en: 'Vegetation NDVI' },
     grad: ['#a9805a', '#e6d27a', '#9cc95a', '#2f8a3a', '#0d4f22'], lo: { th: 'ดินโล่ง', en: 'bare' }, hi: { th: 'พืชหนาแน่น', en: 'dense' } },
-  { id: 'lst', gibs: 'MODIS_Terra_Land_Surface_Temp_Day', level: 7, fmt: 'png', lag: 2, res: '1 km', src: 'NASA MODIS Terra LST (day)', l: { th: 'อุณหภูมิพื้นผิว', en: 'Land surface temp.' },
+  { id: 'lst', gibs: 'MODIS_Terra_L3_Land_Surface_Temp_8Day_Day', level: 7, fmt: 'png', lag: 14, period: 8, res: '1 km', src: 'NASA MODIS Terra LST (day), 8-day composite', l: { th: 'อุณหภูมิพื้นผิว', en: 'Land surface temp.' },
     grad: ['#3b4cc0', '#7aa6f7', '#f2e6a0', '#f08a4b', '#b40426'], lo: { th: 'เย็น', en: 'cool' }, hi: { th: 'ร้อน', en: 'hot' } },
   { id: 'smap', gibs: 'SMAP_L4_Analyzed_Root_Zone_Soil_Moisture', level: 6, fmt: 'png', lag: 5, res: '9 km', src: 'NASA SMAP L4 root zone', l: { th: 'ความชื้นดิน', en: 'Soil moisture' },
     grad: ['#a0522d', '#e8c27a', '#cfe8c0', '#5fa8d3', '#1d3f8f'], lo: { th: 'แห้ง', en: 'dry' }, hi: { th: 'ชื้น', en: 'wet' } },
-  { id: 'imerg', gibs: 'IMERG_Precipitation_Rate', level: 6, fmt: 'png', lag: 2, res: '10 km', src: 'NASA GPM IMERG (daily)', l: { th: 'ฝน', en: 'Rain' },
+  { id: 'imerg', gibs: 'IMERG_Precipitation_Rate', level: 6, fmt: 'png', lag: 2, days: 7, res: '10 km', src: 'NASA GPM IMERG, last 7 days stacked', l: { th: 'ฝน 7 วัน', en: 'Rain, 7 days' },
     grad: ['#a6e3f5', '#3fa0d6', '#2b56c4', '#c43dc4', '#e8333a'], lo: { th: 'น้อย', en: 'light' }, hi: { th: 'หนัก', en: 'heavy' } },
-  { id: 'fire', gwms: 'VIIRS_NOAA20_Thermal_Anomalies_375m_All', lag: 1, res: '375 m', src: 'NASA VIIRS (NOAA-20) active fires', l: { th: 'ไฟ / การเผา', en: 'Fires / burning' },
-    key: { th: 'จุดแดง = ตรวจพบความร้อนผิดปกติ (ไฟหรือการเผาตอซัง)', en: 'Red dots = thermal anomalies (fires or stubble burning)' } },
+  { id: 'fire', gwms: 'VIIRS_NOAA20_Thermal_Anomalies_375m_All', lag: 1, days: 7, res: '375 m', src: 'NASA VIIRS (NOAA-20) active fires, last 7 days', l: { th: 'ไฟ / การเผา 7 วัน', en: 'Fires / burning, 7 days' },
+    key: { th: 'จุดแดง = ตรวจพบความร้อนผิดปกติ (ไฟหรือการเผาตอซัง) ใน 7 วันก่อนวันที่เลือก · ไม่มีจุด = ไม่พบไฟ', en: 'Red dots = thermal anomalies (fires or stubble burning) in the 7 days up to the chosen date · no dots = no fires found' } },
   { id: 'soil_ph', wms: 'https://maps.isric.org/mapserv?map=/map/phh2o.map', layer: 'phh2o_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'pH ดิน', en: 'Soil pH' },
     grad: ['#d7191c', '#fdae61', '#ffffbf', '#abd9e9', '#2c7bb6'], lo: { th: 'กรด', en: 'acid' }, hi: { th: 'ด่าง', en: 'alkaline' } },
   { id: 'soil_soc', wms: 'https://maps.isric.org/mapserv?map=/map/soc.map', layer: 'soc_0-5cm_mean', res: '250 m', src: 'SoilGrids 2.0 (ISRIC)', l: { th: 'คาร์บอนในดิน', en: 'Soil organic carbon' },
@@ -358,16 +358,21 @@ const SAT = [
 let curSat = 'none', satLayer = null, satBack = 0, satErr = 0;
 const isoDay = ms => new Date(ms).toISOString().slice(0, 10);
 /* The date actually requested: the chosen day, capped at (today − product lag), then stepped back if tiles are missing */
-function satDate(o) {
-  const chosen = Date.parse($('gibsDate').value + 'T00:00:00Z'), cap = Date.now() - (o.lag || 0) * 864e5;
-  return isoDay(Math.min(chosen, cap) - satBack * 864e5);
+function satDate(o, back = 0) {
+  const chosen = Date.parse($('gibsDate').value + 'T00:00:00Z'), cap = Date.now() - (o.lag || 0) * 864e5, p = o.period || 1;
+  let ms = Math.min(chosen, cap) - (satBack * p + back) * 864e5;
+  if (p > 1) { const d = new Date(ms), y0 = Date.UTC(d.getUTCFullYear(), 0, 1), doy = Math.floor((ms - y0) / 864e5); ms = y0 + Math.floor(doy / p) * p * 864e5; }
+  return isoDay(ms);
 }
 function makeSat(o) {
   const op = +$('satOpac').value / 100;
   if (o.wms) return L.tileLayer.wms(o.wms, { layers: o.layer, format: 'image/png', transparent: true, pane: 'sat', opacity: op, attribution: o.src });
-  if (o.gwms) return L.tileLayer.wms(GIBS_WMS, { layers: o.gwms, format: 'image/png', transparent: true, version: '1.3.0', time: satDate(o), pane: 'sat', opacity: op, attribution: 'NASA GIBS / ' + o.src });
-  return L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${o.gibs}/default/${satDate(o)}/GoogleMapsCompatible_Level${o.level}/{z}/{y}/{x}.${o.fmt}`,
-    { maxNativeZoom: o.level, maxZoom: 18, pane: 'sat', opacity: op, attribution: 'NASA GIBS / ' + o.src });
+  const one = (back, opacity) => o.gwms
+    ? L.tileLayer.wms(GIBS_WMS, { layers: o.gwms, format: 'image/png', transparent: true, version: '1.3.0', time: satDate(o, back), pane: 'sat', opacity, attribution: 'NASA GIBS / ' + o.src })
+    : L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${o.gibs}/default/${satDate(o, back)}/GoogleMapsCompatible_Level${o.level}/{z}/{y}/{x}.${o.fmt}`, { maxNativeZoom: o.level, maxZoom: 18, pane: 'sat', opacity, attribution: 'NASA GIBS / ' + o.src });
+  /* rain and fires are daily events: the last 7 days are stacked so the layer is not empty on a dry or fire-free day */
+  if (o.days) { const g = L.featureGroup(Array.from({ length: o.days }, (_, i) => one(i, o.gwms ? op : op * 0.45))); g.setOpacity = v => g.eachLayer(l => l.setOpacity(o.gwms ? v : v * 0.45)); return g; }
+  return one(0, op);
 }
 function setSat(id) {
   curSat = id; satBack = 0; satErr = 0;
@@ -383,11 +388,12 @@ function drawSat() {
   if (!o || o.id === 'none') return;
   const layer = satLayer = makeSat(o).addTo(map);
   let ok = 0;
-  layer.on('tileload', () => { ok++; });
+  layer.on('tileload', () => { ok++; if (layer === satLayer) $('satMsg').textContent = ''; });
+  setTimeout(() => { if (layer === satLayer && !ok) $('satMsg').textContent = o.wms ? t('เซิร์ฟเวอร์ SoilGrids ตอบช้า รอสักครู่ หรือกดเลือกชั้นนี้อีกครั้ง', 'The SoilGrids server is slow; wait a moment or select this layer again') : t('กำลังโหลดภาพจาก NASA GIBS…', 'Loading NASA GIBS imagery…'); }, 8000);
   layer.on('tileerror', () => {
     if (layer !== satLayer) return;
     satErr++;
-    if (satErr >= 3 && !ok && o.gibs && satBack < 6) { satBack++; satErr = 0; drawSat(); }
+    if (satErr >= 3 && !ok && o.gibs && !o.days && satBack < 6) { satBack++; satErr = 0; drawSat(); }
     else if (satErr >= 3 && !ok) $('satMsg').textContent = o.wms ? t('โหลดชั้นข้อมูลนี้ไม่ได้ในตอนนี้', 'This layer cannot be loaded right now') : t('ไม่มีภาพช่วงวันที่นี้ ลองเลือกวันอื่น', 'No image around this date; try another day');
   });
 }
@@ -395,7 +401,7 @@ function satLegend() {
   const o = SAT.find(x => x.id === curSat); let h = '';
   if (o && o.id !== 'none') {
     h = o.grad ? `<div style="height:10px;border-radius:5px;background:linear-gradient(90deg,${o.grad.join(',')})"></div><div class="row" style="justify-content:space-between;font-size:.75rem;color:var(--muted)"><span>${L2(o.lo)}</span><span>${L2(o.hi)}</span></div>` : `<p class="note">${L2(o.key)}</p>`;
-    const dated = (o.gibs || o.gwms) && $('gibsDate').value ? ` · ${t('ภาพวันที่', 'image date')} ${satDate(o)}` : '';
+    const dated = (o.gibs || o.gwms) && $('gibsDate').value ? ` · ${o.days ? t('ช่วง', 'period') + ` ${satDate(o, o.days - 1)} – ${satDate(o)}` : o.period ? t(`ภาพรวม ${o.period} วัน เริ่ม`, `${o.period}-day composite from`) + ` ${satDate(o)}` : t('ภาพวันที่', 'image date') + ` ${satDate(o)}`}` : '';
     h += `<p class="note">${o.src} · ${o.res}${dated}${o.grad ? (o.gibs ? t(' · สีโดยประมาณ ดูสเกลเต็มใน Worldview', ' · approximate colours; full scale in Worldview') : t(' · สีโดยประมาณ', ' · approximate colours')) : ''}</p>`;
   }
   $('satLegend').innerHTML = h;
